@@ -15,6 +15,8 @@ source "$inventory_file"
 # shellcheck disable=SC1090
 source "$recipe_file"
 [[ -f "$root_dir/.env" ]] && source "$root_dir/.env"
+MODEL_MOUNT_HOST_PATH="${MODEL_MOUNT_HOST_PATH:-$MODEL_HOST_PATH}"
+MODEL_MOUNT_CONTAINER_PATH="${MODEL_MOUNT_CONTAINER_PATH:-$MODEL_CONTAINER_PATH}"
 set +a
 
 action="${1:-start}"
@@ -70,7 +72,9 @@ remote_node() {
   local assignments=(
     "IMAGE=$IMAGE" "CONTAINER_NAME=$CONTAINER_NAME"
     "MODEL_ID=$MODEL_ID" "MODEL_REVISION=$MODEL_REVISION"
-    "MODEL_HOST_PATH=$MODEL_HOST_PATH" "MODEL_CONTAINER_PATH=$MODEL_CONTAINER_PATH"
+    "MODEL_HOST_PATH=$MODEL_HOST_PATH" "MODEL_MOUNT_HOST_PATH=$MODEL_MOUNT_HOST_PATH"
+    "MODEL_MOUNT_CONTAINER_PATH=$MODEL_MOUNT_CONTAINER_PATH"
+    "MODEL_CONTAINER_PATH=$MODEL_CONTAINER_PATH"
     "CACHE_HOST_PATH=$CACHE_HOST_PATH" "LOG_HOST_PATH=$LOG_HOST_PATH"
     "SERVED_MODEL_NAME=$SERVED_MODEL_NAME" "API_PORT=$API_PORT"
     "MASTER_PORT=$MASTER_PORT" "MAX_MODEL_LEN=$MAX_MODEL_LEN"
@@ -175,6 +179,9 @@ start_all() {
 }
 
 case "$action" in
+  build)
+    prepare_image
+    ;;
   prepare)
     prepare_image
     run_all_parallel prepare
@@ -200,7 +207,7 @@ case "$action" in
     fi
     ;;
   *)
-    echo "usage: $0 [prepare|preflight|start|stop|status|verify|logs [0-3]]" >&2
+    echo "usage: $0 [build|prepare|preflight|start|stop|status|verify|logs [0-3]]" >&2
     exit 2
     ;;
 esac

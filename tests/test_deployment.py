@@ -69,7 +69,10 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertIn("docker save", launcher)
         self.assertIn("smoke-test-glm53.sh", launcher)
         self.assertIn('this recipe requires TP_NODE_COUNT=4', launcher)
+        self.assertIn('MODEL_MOUNT_HOST_PATH="${MODEL_MOUNT_HOST_PATH:-$MODEL_HOST_PATH}"', launcher)
+        self.assertIn('MODEL_MOUNT_CONTAINER_PATH="${MODEL_MOUNT_CONTAINER_PATH:-$MODEL_CONTAINER_PATH}"', launcher)
         for action in (
+            "build",
             "prepare",
             "preflight",
             "start",
@@ -101,6 +104,7 @@ class DeploymentStaticTests(unittest.TestCase):
         )
         for fragment in required:
             self.assertIn(fragment, node)
+        self.assertIn('-v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro"', node)
 
     def test_ring_transport_settings_are_not_imported(self) -> None:
         deployment = "\n".join(

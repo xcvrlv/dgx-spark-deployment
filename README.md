@@ -72,7 +72,10 @@ four management addresses (normally Spark 1):
 # Optional SSH settings belong in the ignored .env file.
 cp .env.example .env
 
-# Pull the image and download the pinned model onto every node.
+# Build the pinned SM121 image on Spark 1 and distribute it to every node.
+bash scripts/launch-glm53-flash.sh build
+
+# Or build the image, then download/verify the model on every node.
 bash scripts/launch-glm53-flash.sh prepare
 
 # Validate Docker, SM121, RoCE, image, model, and revision on every node.
@@ -82,12 +85,19 @@ bash scripts/launch-glm53-flash.sh preflight
 bash scripts/launch-glm53-flash.sh start
 ```
 
-Operational commands are `status`, `verify`, `logs [0-3]`, and `stop`. A successful
-start waits for the health endpoint, verifies finite token logprobs and tool
-calling, checks every container for OOM/restarts/fatal logs, then prints the
-OpenAI-compatible API URL.
+Operational commands are `build`, `status`, `verify`, `logs [0-3]`, and `stop`.
+Use `build` when model weights already exist at `MODEL_HOST_PATH`; unlike
+`prepare`, it does not run `hf download`. A successful start waits for the health
+endpoint, verifies finite token logprobs and tool calling, checks every container
+for OOM/restarts/fatal logs, then prints the OpenAI-compatible API URL.
 The model is downloaded independently to `MODEL_HOST_PATH` on each Spark; a
 shared mount can be used by changing that one recipe value.
+
+For an existing Hugging Face cache snapshot, set `MODEL_HOST_PATH` to the exact
+snapshot for host-side validation, set `MODEL_MOUNT_HOST_PATH` to the parent
+`models--ORG--NAME` directory so its `blobs` symlinks remain valid, set
+`MODEL_MOUNT_CONTAINER_PATH` to `/model-mount`, and set `MODEL_CONTAINER_PATH`
+to `/model-mount/snapshots/REVISION`.
 
 The default path builds the pinned SM121 image on Spark 1 and streams that exact
 image to the other ranks. To use an already published image instead, override
