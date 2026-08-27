@@ -1,3 +1,4 @@
+import ast
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -15,6 +16,58 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
     if count != 1:
         raise SystemExit(f"{label}: expected one source match in {path}, found {count}")
     path.write_text(source.replace(old, new))
+
+
+def guard_persistent_topk(path: Path) -> None:
+    source = path.read_text()
+    marker = "multi_processor_count >= 78"
+    if marker in source:
+        raise SystemExit(f"small-SM persistent TopK gate: already present in {path}")
+
+    tree = ast.parse(source)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "persistent_topk"
+    ]
+    if len(calls) != 1:
+        raise SystemExit(
+            f"small-SM persistent TopK gate: expected one call in {path}, "
+            f"found {len(calls)}"
+        )
+
+    call = calls[0]
+    enclosing = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and node.lineno <= call.lineno <= node.end_lineno
+    ]
+    if not enclosing:
+        raise SystemExit(
+            f"small-SM persistent TopK gate: call has no enclosing condition in {path}"
+        )
+    target = min(
+        enclosing,
+        key=lambda node: (node.end_lineno - node.lineno, -node.col_offset),
+    )
+    test = target.test
+    if test.end_lineno is None or test.end_col_offset is None:
+        raise SystemExit("small-SM persistent TopK gate: AST lacks source positions")
+
+    lines = source.splitlines(keepends=True)
+    start = sum(map(len, lines[: test.lineno - 1])) + test.col_offset
+    end = sum(map(len, lines[: test.end_lineno - 1])) + test.end_col_offset
+    old_test = source[start:end]
+    new_test = (
+        f"({old_test}) and "
+        "torch.cuda.get_device_properties(logits.device).multi_processor_count >= 78"
+    )
+    patched = source[:start] + new_test + source[end:]
+    ast.parse(patched)
+    path.write_text(patched)
 
 
 vllm = package_root("vllm")
@@ -125,17 +178,7 @@ replace_once(
 # shared memory per block. The persistent TopK kernel can require more CTAs than
 # SM121 can host, while its only C++ fallback requires 128 KiB shared memory.
 # Use the existing multi-wave per-row kernel on small-SM devices instead.
-replace_once(
-    indexer,
-    "        if select_k in (512, 1024, 2048):\n",
-    """        use_persistent_topk = (
-            select_k in (512, 1024, 2048)
-            and torch.cuda.get_device_properties(logits.device).multi_processor_count >= 78
-        )
-        if use_persistent_topk:
-""",
-    "small-SM persistent TopK gate",
-)
+guard_persistent_topk(indexer)
 replace_once(
     vllm / "models/glm5next/nvidia/ops/kpool_compress.py",
     "    hist_out = tl.where(pid >= 0, hist_val, -1)\n",

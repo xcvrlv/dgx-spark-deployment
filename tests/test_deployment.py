@@ -1,5 +1,6 @@
 import importlib.util
 import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -169,7 +170,29 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertIn("return major in (9, 10)", patch)
         self.assertIn("capability.major in (9, 12)", patch)
         self.assertIn("multi_processor_count >= 78", patch)
-        self.assertIn('"small-SM persistent TopK gate"', patch)
+        self.assertIn("def guard_persistent_topk", patch)
+
+    def test_topk_guard_finds_the_call_instead_of_matching_branch_text(self) -> None:
+        patch_source = (ROOT / "docker/patch_sm121.py").read_text()
+        helpers = patch_source.split("\nvllm = package_root", maxsplit=1)[0]
+        namespace: dict[str, object] = {}
+        exec(helpers, namespace)
+        fixture = """\
+def decode(logits):
+    use_fast_topk = select_k in (512, 1024, 2048)
+    if use_fast_topk:
+        torch.ops._C.persistent_topk(logits)
+    else:
+        fallback(logits)
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "indexer.py"
+            path.write_text(fixture)
+            namespace["guard_persistent_topk"](path)
+            patched = path.read_text()
+        self.assertIn("(use_fast_topk) and torch.cuda.get_device_properties", patched)
+        self.assertIn("multi_processor_count >= 78", patched)
+        compile(patched, "indexer.py", "exec")
 
     def test_smoke_test_covers_finite_decode_and_tool_calling(self) -> None:
         smoke = (ROOT / "scripts/smoke-test-glm53.sh").read_text()
