@@ -137,7 +137,7 @@ PY
     >/dev/null
 
   local serve_help
-  serve_help="$(docker run --rm --entrypoint vllm "$IMAGE" serve --help)"
+  serve_help="$(docker run --rm --gpus all --entrypoint vllm "$IMAGE" serve --help)"
   for flag in --linear-backend --moe-backend --kda-prefill-backend --kv-cache-memory-bytes; do
     grep -Fq -- "$flag" <<<"$serve_help" || {
       echo "image does not support required vLLM flag: $flag" >&2

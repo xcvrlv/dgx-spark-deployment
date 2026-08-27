@@ -105,6 +105,10 @@ class DeploymentStaticTests(unittest.TestCase):
         for fragment in required:
             self.assertIn(fragment, node)
         self.assertIn('-v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro"', node)
+        self.assertIn(
+            'docker run --rm --gpus all --entrypoint vllm "$IMAGE" serve --help',
+            node,
+        )
 
     def test_ring_transport_settings_are_not_imported(self) -> None:
         deployment = "\n".join(
