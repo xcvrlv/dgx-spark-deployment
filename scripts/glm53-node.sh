@@ -15,7 +15,7 @@ required_env=(
   KDA_PREFILL_BACKEND LOAD_FORMAT MTP_SPECULATIVE_TOKENS KV_CACHE_DTYPE
   ENABLE_CHUNKED_PREFILL ENABLE_PREFIX_CACHING ASYNC_SCHEDULING
   DISABLE_CUSTOM_ALL_REDUCE KERNEL_CONFIG COMPILATION_CONFIG VERIFY_CUDA_GRAPHS
-  MTP_DRAFT_TP_SIZE MTP_USE_LOCAL_ARGMAX_REDUCTION MTP_DRAFT_SAMPLE_METHOD
+  MTP_DRAFT_TP_SIZE MTP_MOE_BACKEND MTP_USE_LOCAL_ARGMAX_REDUCTION MTP_DRAFT_SAMPLE_METHOD
   MTP_REJECTION_SAMPLE_METHOD
   ENFORCE_EAGER CONTAINER_MEMORY CONTAINER_SHM_SIZE CONTAINER_NOFILE NCCL_IB_GID_INDEX
   NCCL_IB_ADDR_RANGE NCCL_DEBUG PULL_IMAGE ALLOW_UNVERIFIED_MODEL
@@ -226,7 +226,7 @@ start_node() {
   if (( MTP_SPECULATIVE_TOKENS > 0 )); then
     local local_argmax=false
     [[ "$MTP_USE_LOCAL_ARGMAX_REDUCTION" == "1" ]] && local_argmax=true
-    serve_args+=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\",\"rejection_sample_method\":\"$MTP_REJECTION_SAMPLE_METHOD\"}")
+    serve_args+=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"moe_backend\":\"$MTP_MOE_BACKEND\",\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\",\"rejection_sample_method\":\"$MTP_REJECTION_SAMPLE_METHOD\"}")
   fi
   serve_args+=("${headless[@]}")
 

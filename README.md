@@ -129,11 +129,12 @@ PROFILE_FILE=profiles/glm53-mtp-3.env \
 
 `verify` rejects the graph profiles unless rank 0 logs show that CUDA graph
 capture ran. The MTP profiles use TP4 draft execution, greedy draft sampling,
-and local argmax reduction. The pinned vLLM engine supports async scheduling
-for its EAGLE/MTP path, so it remains enabled. Benchmark JSON is written under
-`benchmarks/results/`; it reports an uncached long-prefill approximation plus
-generic and predictable structured decode rates. Compare medians, not the first
-request after startup.
+and local argmax reduction. They retain Marlin for the target model's NVFP4 MoE
+layers while selecting Triton for the unquantized MTP draft layers. The pinned
+vLLM engine supports async scheduling for its EAGLE/MTP path, so it remains
+enabled. Benchmark JSON is written under `benchmarks/results/`; it reports an
+uncached long-prefill approximation plus generic and predictable structured
+decode rates. Compare medians, not the first request after startup.
 
 When the vLLM `/metrics` endpoint exports speculative-decoding counters, the
 result also records the drafted-token acceptance rate for tuning MTP depth.

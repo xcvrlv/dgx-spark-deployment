@@ -65,6 +65,7 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertEqual(recipe["ENFORCE_EAGER"], "1")
         self.assertEqual(recipe["VERIFY_CUDA_GRAPHS"], "0")
         self.assertEqual(recipe["MTP_DRAFT_SAMPLE_METHOD"], "greedy")
+        self.assertEqual(recipe["MTP_MOE_BACKEND"], "triton")
 
     def test_performance_profiles_stage_graphs_before_mtp(self) -> None:
         graphs = read_env(ROOT / "profiles/glm53-cudagraph.env")
@@ -81,6 +82,7 @@ class DeploymentStaticTests(unittest.TestCase):
         for profile in (mtp_one, mtp_three):
             self.assertEqual(profile["ASYNC_SCHEDULING"], "1")
             self.assertEqual(profile["MTP_DRAFT_TP_SIZE"], "4")
+            self.assertEqual(profile["MTP_MOE_BACKEND"], "triton")
             self.assertEqual(profile["MTP_USE_LOCAL_ARGMAX_REDUCTION"], "1")
             self.assertEqual(profile["MTP_DRAFT_SAMPLE_METHOD"], "greedy")
 
@@ -129,6 +131,7 @@ class DeploymentStaticTests(unittest.TestCase):
             "--async-scheduling",
             "--compilation-config",
             "--speculative-config",
+            'moe_backend\\\":\\\"$MTP_MOE_BACKEND',
             'grep -Ei \'Capturing CUDA graph|CUDA graph capture|Graph capturing finished\'',
         )
         for fragment in required:

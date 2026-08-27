@@ -59,7 +59,17 @@ if [[ "$MTP_USE_LOCAL_ARGMAX_REDUCTION" == "1" && "$MTP_DRAFT_SAMPLE_METHOD" != 
   echo "local argmax reduction requires MTP_DRAFT_SAMPLE_METHOD=greedy" >&2
   exit 2
 fi
+if (( MTP_SPECULATIVE_TOKENS > 0 )); then
+  case "$MTP_MOE_BACKEND" in
+    triton|batched_triton|flashinfer_trtllm|flashinfer_cutlass|aiter) ;;
+    *)
+      echo "MTP_MOE_BACKEND=$MTP_MOE_BACKEND is not valid for the unquantized MTP model" >&2
+      exit 2
+      ;;
+  esac
+fi
 [[ -z "$profile_file" ]] || echo "Using performance profile: $profile_file"
+echo "Effective backends: target_moe=$MOE_BACKEND mtp_moe=$MTP_MOE_BACKEND mtp_tokens=$MTP_SPECULATIVE_TOKENS eager=$ENFORCE_EAGER"
 ssh_options=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 [[ -n "${SPARK_SSH_KEY:-}" ]] && ssh_options+=(-i "$SPARK_SSH_KEY")
 
@@ -117,6 +127,7 @@ remote_node() {
     "COMPILATION_CONFIG=$COMPILATION_CONFIG" "VERIFY_CUDA_GRAPHS=$VERIFY_CUDA_GRAPHS"
     "MTP_SPECULATIVE_TOKENS=$MTP_SPECULATIVE_TOKENS"
     "MTP_DRAFT_TP_SIZE=$MTP_DRAFT_TP_SIZE"
+    "MTP_MOE_BACKEND=$MTP_MOE_BACKEND"
     "MTP_USE_LOCAL_ARGMAX_REDUCTION=$MTP_USE_LOCAL_ARGMAX_REDUCTION"
     "MTP_DRAFT_SAMPLE_METHOD=$MTP_DRAFT_SAMPLE_METHOD"
     "MTP_REJECTION_SAMPLE_METHOD=$MTP_REJECTION_SAMPLE_METHOD"

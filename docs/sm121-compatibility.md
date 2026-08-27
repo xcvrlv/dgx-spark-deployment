@@ -54,7 +54,9 @@ top of vLLM's pinned ARM64 CUDA 13.0 day-zero image:
    graphs while retaining piecewise capture for prefill and mixed batches.
 2. Launch `profiles/glm53-mtp-1.env`. Its single draft token is the low-memory
    correctness gate. Greedy local-argmax reduction keeps draft selection from
-   performing a vocabulary-sized all-gather across TP4.
+   performing a vocabulary-sized all-gather across TP4. Its unquantized draft
+   MoE explicitly uses Triton instead of inheriting the NVFP4 target's Marlin
+   backend.
 3. Launch `profiles/glm53-mtp-3.env` only after the first MTP profile is clean.
    Keep it only when generic decode improves without OOM, non-finite logprobs,
    tool-call regressions, or a prefill regression. Structured decode is listed
