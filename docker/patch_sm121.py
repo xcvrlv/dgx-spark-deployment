@@ -120,6 +120,22 @@ replace_once(
 """,
     "decode top-k initialization",
 )
+
+# GB10 exposes 48 resident CTAs at this TopK shape and 101,376 bytes of opt-in
+# shared memory per block. The persistent TopK kernel can require more CTAs than
+# SM121 can host, while its only C++ fallback requires 128 KiB shared memory.
+# Use the existing multi-wave per-row kernel on small-SM devices instead.
+replace_once(
+    indexer,
+    "        if select_k in (512, 1024, 2048):\n",
+    """        use_persistent_topk = (
+            select_k in (512, 1024, 2048)
+            and torch.cuda.get_device_properties(logits.device).multi_processor_count >= 78
+        )
+        if use_persistent_topk:
+""",
+    "small-SM persistent TopK gate",
+)
 replace_once(
     vllm / "models/glm5next/nvidia/ops/kpool_compress.py",
     "    hist_out = tl.where(pid >= 0, hist_val, -1)\n",
@@ -143,4 +159,3 @@ replace_once(
 )
 
 print("Applied guarded GLM-5.3 SM121 compatibility patches")
-

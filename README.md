@@ -151,7 +151,7 @@ ARM64 Spark:
 
 ```bash
 docker build -f docker/Dockerfile.glm53-sm121 \
-  -t spark-vllm-glm53:sm121-v1 docker
+  -t spark-vllm-glm53:sm121-v2 docker
 ```
 
 See [`docs/sm121-compatibility.md`](docs/sm121-compatibility.md) for the patch

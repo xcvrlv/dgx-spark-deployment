@@ -40,6 +40,11 @@ top of vLLM's pinned ARM64 CUDA 13.0 day-zero image:
 9. Use Marlin for NVFP4 MoE in the first iteration. FlashInfer CUTLASS triggers
    a 97-object `fused_moe_120` JIT on SM121 and has also produced silently
    incorrect repeated-token output in independent GLM-5.3 Spark deployments.
+10. Disable the persistent sparse-indexer TopK path on small-SM GPUs. At this
+    TopK shape GB10 exposes a 48 resident-CTA ceiling and 101,376 bytes of
+    shared memory per block; the persistent kernel can oversubscribe that
+    ceiling, while its fallback requires 128 KiB. SM121 instead uses vLLM's
+    existing per-row TopK path.
 
 ## Performance gates
 

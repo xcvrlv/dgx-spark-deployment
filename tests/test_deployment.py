@@ -138,6 +138,7 @@ class DeploymentStaticTests(unittest.TestCase):
             'docker run --rm --gpus all --entrypoint vllm "$IMAGE" serve --help=all',
             node,
         )
+        self.assertIn('"SM121 persistent TopK guard is missing"', node)
 
     def test_ring_transport_settings_are_not_imported(self) -> None:
         deployment = "\n".join(
@@ -167,6 +168,8 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertIn('count != 1', patch)
         self.assertIn("return major in (9, 10)", patch)
         self.assertIn("capability.major in (9, 12)", patch)
+        self.assertIn("multi_processor_count >= 78", patch)
+        self.assertIn('"small-SM persistent TopK gate"', patch)
 
     def test_smoke_test_covers_finite_decode_and_tool_calling(self) -> None:
         smoke = (ROOT / "scripts/smoke-test-glm53.sh").read_text()

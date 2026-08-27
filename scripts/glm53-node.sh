@@ -138,6 +138,10 @@ PY
     'import torch; cap=torch.cuda.get_device_capability(); assert cap == (12, 1), cap; print("SM%d%d" % cap)' \
     >/dev/null
 
+  docker run --rm --entrypoint python3 "$IMAGE" -c \
+    'from pathlib import Path; p=Path("/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/sparse_attn_indexer_kpool.py"); s=p.read_text(); assert "multi_processor_count >= 78" in s, "SM121 persistent TopK guard is missing"' \
+    >/dev/null
+
   docker run --rm --entrypoint sh \
     -v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro" \
     "$IMAGE" -c 'test -f "$1/config.json" && test -f "$1/model.safetensors.index.json"' \
