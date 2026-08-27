@@ -174,6 +174,10 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertIn("capability.major in (9, 12)", patch)
         self.assertIn("multi_processor_count >= 78", patch)
         self.assertIn("def guard_persistent_topk", patch)
+        self.assertIn("MTP draft MoE backend propagation", patch)
+        self.assertIn("moe_backend=speculative_config.moe_backend", patch)
+        recipe = (ROOT / "recipes/glm-5.3-flash-nvfp4.env").read_text()
+        self.assertIn("IMAGE=spark-vllm-glm53:sm121-v3", recipe)
 
     def test_topk_guard_finds_the_call_instead_of_matching_branch_text(self) -> None:
         patch_source = (ROOT / "docker/patch_sm121.py").read_text()

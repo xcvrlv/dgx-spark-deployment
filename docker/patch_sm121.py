@@ -73,6 +73,43 @@ def guard_persistent_topk(path: Path) -> None:
 vllm = package_root("vllm")
 flashinfer = package_root("flashinfer")
 
+# The pinned vLLM commit exposes speculative_config.moe_backend but does not
+# apply it while constructing an EAGLE/MTP draft. Replace only the local
+# VllmConfig so the quantized target keeps Marlin and the unquantized draft can
+# select Triton.
+replace_once(
+    vllm / "v1/worker/gpu/spec_decode/eagle/utils.py",
+    """    if speculative_config.kv_cache_dtype is not None:
+        vllm_config = replace(
+            vllm_config,
+            cache_config=replace(
+                vllm_config.cache_config,
+                cache_dtype=speculative_config.kv_cache_dtype,
+            ),
+        )
+    with set_model_tag("eagle_head"):
+""",
+    """    if speculative_config.kv_cache_dtype is not None:
+        vllm_config = replace(
+            vllm_config,
+            cache_config=replace(
+                vllm_config.cache_config,
+                cache_dtype=speculative_config.kv_cache_dtype,
+            ),
+        )
+    if speculative_config.moe_backend is not None:
+        vllm_config = replace(
+            vllm_config,
+            kernel_config=replace(
+                vllm_config.kernel_config,
+                moe_backend=speculative_config.moe_backend,
+            ),
+        )
+    with set_model_tag("eagle_head"):
+""",
+    "MTP draft MoE backend propagation",
+)
+
 # Make the NoPE FlashInfer MLA path available on SM121. GLM has pe_dim=0, so
 # the SM120 DeepSeek-specific packed-cache backend cannot represent its cache.
 replace_once(
