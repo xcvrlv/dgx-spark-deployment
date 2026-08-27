@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+FROM vllm/vllm-openai:glm53-flash-arm64-cu130@sha256:905c02933be6021301db2dc284e24e3727467aa3a0f63b41d609885778a07bce
+
+ARG FLASHINFER_VERSION=0.6.18.dev20260819
+ARG NCCL_VERSION=2.30.7
+ARG CUTLASS_DSL_VERSION=4.6.2
+ARG INSTANTTENSOR_VERSION=0.1.9
+
+# FlashInfer 0.6.17 produces non-finite FA2 MLA results for common SM121 batch
+# shapes. Remove its AOT cache, then restore dependencies which the nightly is
+# known to downgrade or skew on DGX Spark.
+RUN pip install --no-cache-dir --pre \
+      "flashinfer-python==${FLASHINFER_VERSION}" \
+      "flashinfer-cubin==${FLASHINFER_VERSION}" \
+      --extra-index-url https://flashinfer.ai/whl/nightly/ \
+    && pip uninstall -y flashinfer-jit-cache \
+    && pip install --no-cache-dir \
+      "nvidia-nccl-cu13==${NCCL_VERSION}" \
+      "nvidia-cutlass-dsl==${CUTLASS_DSL_VERSION}"
+
+COPY patch_sm121.py /tmp/patch_sm121.py
+RUN python3 /tmp/patch_sm121.py && rm /tmp/patch_sm121.py
+
+# Direct I/O avoids retaining roughly 190 GiB of model shards in the GB10 page
+# cache. Its dependency resolver can downgrade NCCL, so pin NCCL once more.
+RUN pip install --no-cache-dir "instanttensor==${INSTANTTENSOR_VERSION}" \
+    && pip install --no-cache-dir \
+      "nvidia-nccl-cu13==${NCCL_VERSION}" \
+      "nvidia-cutlass-dsl==${CUTLASS_DSL_VERSION}" \
+    && python3 - <<'PY'
+from importlib.metadata import version
+assert version("flashinfer-python") == "0.6.18.dev20260819"
+assert version("nvidia-nccl-cu13") == "2.30.7"
+assert version("nvidia-cutlass-dsl") == "4.6.2"
+assert version("instanttensor") == "0.1.9"
+import instanttensor
+print("SM121 GLM-5.3 image dependency check passed")
+PY
+
+LABEL org.opencontainers.image.title="GLM-5.3 Flash SM121 vLLM" \
+      org.opencontainers.image.description="DGX Spark compatibility layer for GLM-5.3 Flash NVFP4"

@@ -1,0 +1,42 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.secrets
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Build and test output
+build/
+dist/
+*.egg-info/
+coverage.xml
+.coverage
+htmlcov/
+
+# Logs, temporary files, and benchmark output
+*.log
+*.tmp
+*.swp
+tmp/
+logs/
+results/
+benchmarks/results/
+
+# Container and local tooling state
+.docker/
+.cache/
+.terraform/
+
+# Keep the shared four-node inventory in the repository.
+!sparks.env
