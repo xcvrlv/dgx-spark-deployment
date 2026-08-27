@@ -4,9 +4,10 @@ The initial recipe deliberately separates the proven non-ring serving profile
 from speculative decoding. It serves the pinned
 `local-inference-lab/GLM-5.3-Flash-NVFP4` checkpoint with TP4, the model-native
 1,048,576-token context, an explicit 8 GiB FP8 KV slab, FlashInfer B12X linear
-kernels, FlashInfer CUTLASS MoE, FlashKDA prefill, eager execution, and no MTP.
-Once coherent output, finite logprobs, tool calling, and a real long prefill
-pass, MTP can be enabled independently in the recipe.
+kernels, Marlin MoE, FlashKDA prefill, eager execution, and no MTP. The
+`glm53-cudagraph` profile is the next gate; `glm53-mtp-1` and `glm53-mtp-3`
+are applied only after graph capture, coherent output, finite logprobs, tool
+calling, and a real long prefill pass have succeeded.
 
 The backend, scheduler, loader, and checkpoint settings are adapted from the
 [FujitsuPolycom TP4 Spark service contract](https://github.com/FujitsuPolycom/glm53-flash-tp4-spark/tree/c822fae8394fcaacd47db1fd6fdd7df67cb822b0).
@@ -39,6 +40,20 @@ top of vLLM's pinned ARM64 CUDA 13.0 day-zero image:
 9. Use Marlin for NVFP4 MoE in the first iteration. FlashInfer CUTLASS triggers
    a 97-object `fused_moe_120` JIT on SM121 and has also produced silently
    incorrect repeated-token output in independent GLM-5.3 Spark deployments.
+
+## Performance gates
+
+1. Benchmark the eager control, then launch `profiles/glm53-cudagraph.env`.
+   Rank 0 must log CUDA graph capture and the finite-logprob/tool-call smoke
+   tests must still pass. `FULL_AND_PIECEWISE` gives the decode path full-model
+   graphs while retaining piecewise capture for prefill and mixed batches.
+2. Launch `profiles/glm53-mtp-1.env`. Its single draft token is the low-memory
+   correctness gate. Greedy local-argmax reduction keeps draft selection from
+   performing a vocabulary-sized all-gather across TP4.
+3. Launch `profiles/glm53-mtp-3.env` only after the first MTP profile is clean.
+   Keep it only when generic decode improves without OOM, non-finite logprobs,
+   tool-call regressions, or a prefill regression. Structured decode is listed
+   separately because its MTP acceptance is normally much higher.
 
 Every source edit is guarded and the image build fails when its expected
 upstream source no longer matches. That is intentional: a changed upstream

@@ -63,7 +63,9 @@ the local-inference-lab checkpoint and starts one vLLM rank on each Spark using
 native multi-node tensor parallelism. The default profile exposes the full
 1,048,576-token model context, uses an explicit 8 GiB FP8 KV slab per rank,
 FlashInfer B12X/CUTLASS kernels, FlashKDA, chunked prefill, and prefix caching.
-MTP remains disabled until ordinary decode has passed the fleet smoke tests.
+The base recipe remains an eager, non-MTP control. CUDA graphs and MTP are
+enabled through staged profiles so their gains and memory costs can be measured
+independently.
 
 Run the fleet launcher from a Linux machine with passwordless SSH access to all
 four management addresses (normally Spark 1):
@@ -83,15 +85,58 @@ bash scripts/launch-glm53-flash.sh preflight
 
 # Tear down stale ranks, launch workers 3 -> 2 -> 1, then head rank 0.
 bash scripts/launch-glm53-flash.sh start
+
+# Record the eager baseline before changing performance settings.
+bash scripts/launch-glm53-flash.sh benchmark
 ```
 
-Operational commands are `build`, `status`, `verify`, `logs [0-3]`, and `stop`.
+Operational commands are `build`, `status`, `verify`, `benchmark`,
+`logs [0-3]`, and `stop`.
 Use `build` when model weights already exist at `MODEL_HOST_PATH`; unlike
 `prepare`, it does not run `hf download`. A successful start waits for the health
 endpoint, verifies finite token logprobs and tool calling, checks every container
 for OOM/restarts/fatal logs, then prints the OpenAI-compatible API URL.
 The model is downloaded independently to `MODEL_HOST_PATH` on each Spark; a
 shared mount can be used by changing that one recipe value.
+
+## CUDA graph and MTP rollout
+
+Apply one profile at a time and use the same profile for `preflight`, `start`,
+and `verify`. The graph profile requests vLLM `FULL_AND_PIECEWISE` capture:
+full-model graphs for compatible decode batches, piecewise graphs for prefill
+and mixed batches, and eager fallback for shapes which cannot be captured. It
+also raises the chunked-prefill budget from 8,192 to 32,768 tokens.
+
+```bash
+# Stage 1: CUDA graphs, no MTP. Startup will take longer while graphs capture.
+PROFILE_FILE=profiles/glm53-cudagraph.env \
+  bash scripts/launch-glm53-flash.sh start
+PROFILE_FILE=profiles/glm53-cudagraph.env \
+  bash scripts/launch-glm53-flash.sh benchmark
+
+# Stage 2: one MTP draft token for correctness, memory, and acceptance testing.
+PROFILE_FILE=profiles/glm53-mtp-1.env \
+  bash scripts/launch-glm53-flash.sh start
+PROFILE_FILE=profiles/glm53-mtp-1.env \
+  bash scripts/launch-glm53-flash.sh benchmark
+
+# Stage 3: three draft tokens after mtp-1 passes verify and the smoke test.
+PROFILE_FILE=profiles/glm53-mtp-3.env \
+  bash scripts/launch-glm53-flash.sh start
+PROFILE_FILE=profiles/glm53-mtp-3.env \
+  bash scripts/launch-glm53-flash.sh benchmark
+```
+
+`verify` rejects the graph profiles unless rank 0 logs show that CUDA graph
+capture ran. The MTP profiles use TP4 draft execution, greedy draft sampling,
+and local argmax reduction. The pinned vLLM engine supports async scheduling
+for its EAGLE/MTP path, so it remains enabled. Benchmark JSON is written under
+`benchmarks/results/`; it reports an uncached long-prefill approximation plus
+generic and predictable structured decode rates. Compare medians, not the first
+request after startup.
+
+When the vLLM `/metrics` endpoint exports speculative-decoding counters, the
+result also records the drafted-token acceptance rate for tuning MTP depth.
 
 For an existing Hugging Face cache snapshot, set `MODEL_HOST_PATH` to the exact
 snapshot for host-side validation, set `MODEL_MOUNT_HOST_PATH` to the parent

@@ -1,3 +1,4 @@
+import importlib.util
 import re
 import unittest
 from pathlib import Path
@@ -60,6 +61,27 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertEqual(recipe["ALLOW_UNVERIFIED_MODEL"], "0")
         self.assertEqual(recipe["RUN_SMOKE_TEST"], "1")
         self.assertEqual(recipe["CONTAINER_NOFILE"], "1048576")
+        self.assertEqual(recipe["ENFORCE_EAGER"], "1")
+        self.assertEqual(recipe["VERIFY_CUDA_GRAPHS"], "0")
+        self.assertEqual(recipe["MTP_DRAFT_SAMPLE_METHOD"], "greedy")
+
+    def test_performance_profiles_stage_graphs_before_mtp(self) -> None:
+        graphs = read_env(ROOT / "profiles/glm53-cudagraph.env")
+        mtp_one = read_env(ROOT / "profiles/glm53-mtp-1.env")
+        mtp_three = read_env(ROOT / "profiles/glm53-mtp-3.env")
+        for profile in (graphs, mtp_one, mtp_three):
+            self.assertEqual(profile["ENFORCE_EAGER"], "0")
+            self.assertEqual(profile["VERIFY_CUDA_GRAPHS"], "1")
+            self.assertIn('"cudagraph_mode":"FULL_AND_PIECEWISE"', profile["COMPILATION_CONFIG"])
+            self.assertEqual(profile["MAX_NUM_BATCHED_TOKENS"], "32768")
+        self.assertEqual(graphs["MTP_SPECULATIVE_TOKENS"], "0")
+        self.assertEqual(mtp_one["MTP_SPECULATIVE_TOKENS"], "1")
+        self.assertEqual(mtp_three["MTP_SPECULATIVE_TOKENS"], "3")
+        for profile in (mtp_one, mtp_three):
+            self.assertEqual(profile["ASYNC_SCHEDULING"], "1")
+            self.assertEqual(profile["MTP_DRAFT_TP_SIZE"], "4")
+            self.assertEqual(profile["MTP_USE_LOCAL_ARGMAX_REDUCTION"], "1")
+            self.assertEqual(profile["MTP_DRAFT_SAMPLE_METHOD"], "greedy")
 
     def test_launcher_is_worker_first_and_tears_down_every_rank(self) -> None:
         launcher = (ROOT / "scripts/launch-glm53-flash.sh").read_text()
@@ -80,6 +102,7 @@ class DeploymentStaticTests(unittest.TestCase):
             "stop",
             "status",
             "verify",
+            "benchmark",
             "logs",
         ):
             self.assertIn(f"{action})", launcher)
@@ -103,6 +126,9 @@ class DeploymentStaticTests(unittest.TestCase):
             "--enable-chunked-prefill",
             "--enable-prefix-caching",
             "--async-scheduling",
+            "--compilation-config",
+            "--speculative-config",
+            'grep -Ei \'Capturing CUDA graph|CUDA graph capture|Graph capturing finished\'',
         )
         for fragment in required:
             self.assertIn(fragment, node)
@@ -149,6 +175,36 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertIn("EXPECTED_MAX_MODEL_LEN", smoke)
         self.assertIn('"tool_choice":"required"', smoke)
         self.assertIn('== "echo_word"', smoke)
+
+    def test_benchmark_uses_uncached_prefill_and_streaming_decode_math(self) -> None:
+        benchmark_path = ROOT / "scripts/benchmark-glm53.py"
+        source = benchmark_path.read_text()
+        self.assertIn('"stream_options": {"include_usage": True}', source)
+        self.assertIn("(completion_tokens - 1) / decode_seconds", source)
+        self.assertIn("uuid.uuid4()", source)
+
+        spec = importlib.util.spec_from_file_location(
+            "benchmark_glm53", benchmark_path
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        prompt_a = module.make_prefill_prompt(32)
+        prompt_b = module.make_prefill_prompt(32)
+        self.assertNotEqual(prompt_a, prompt_b)
+        self.assertGreaterEqual(len(prompt_a.split()), 32)
+        metrics = module.metric_delta(
+            {
+                "vllm:spec_decode_num_accepted_tokens_total": 10.0,
+                "vllm:spec_decode_num_draft_tokens_total": 20.0,
+            },
+            {
+                "vllm:spec_decode_num_accepted_tokens_total": 40.0,
+                "vllm:spec_decode_num_draft_tokens_total": 70.0,
+            },
+        )
+        self.assertEqual(metrics["calculated_draft_acceptance_rate"], 0.6)
 
 
 if __name__ == "__main__":

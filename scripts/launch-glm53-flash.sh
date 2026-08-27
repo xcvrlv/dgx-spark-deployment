@@ -4,16 +4,30 @@ set -euo pipefail
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 inventory_file="${INVENTORY_FILE:-$root_dir/sparks.env}"
 recipe_file="${RECIPE_FILE:-$root_dir/recipes/glm-5.3-flash-nvfp4.env}"
+profile_file="${PROFILE_FILE:-}"
 node_script="$root_dir/scripts/glm53-node.sh"
 
 [[ -f "$inventory_file" ]] || { echo "inventory not found: $inventory_file" >&2; exit 2; }
 [[ -f "$recipe_file" ]] || { echo "recipe not found: $recipe_file" >&2; exit 2; }
+if [[ -n "$profile_file" && "$profile_file" != /* ]]; then
+  profile_file="$root_dir/$profile_file"
+fi
+[[ -z "$profile_file" || -f "$profile_file" ]] || {
+  echo "performance profile not found: $profile_file" >&2
+  exit 2
+}
 
 set -a
 # shellcheck disable=SC1090
 source "$inventory_file"
 # shellcheck disable=SC1090
 source "$recipe_file"
+# A profile changes only performance-sensitive settings. Local .env values are
+# sourced last so node paths and deliberate experiment overrides still win.
+if [[ -n "$profile_file" ]]; then
+  # shellcheck disable=SC1090
+  source "$profile_file"
+fi
 [[ -f "$root_dir/.env" ]] && source "$root_dir/.env"
 MODEL_MOUNT_HOST_PATH="${MODEL_MOUNT_HOST_PATH:-$MODEL_HOST_PATH}"
 MODEL_MOUNT_CONTAINER_PATH="${MODEL_MOUNT_CONTAINER_PATH:-$MODEL_CONTAINER_PATH}"
@@ -31,6 +45,21 @@ selected_rank="${2:-}"
   echo "BUILD_IMAGE and PULL_IMAGE cannot both be enabled" >&2
   exit 2
 }
+for boolean_name in ENFORCE_EAGER VERIFY_CUDA_GRAPHS MTP_USE_LOCAL_ARGMAX_REDUCTION; do
+  [[ "${!boolean_name}" =~ ^[01]$ ]] || {
+    echo "$boolean_name must be 0 or 1" >&2
+    exit 2
+  }
+done
+[[ "$MTP_SPECULATIVE_TOKENS" =~ ^[0-9]+$ ]] || {
+  echo "MTP_SPECULATIVE_TOKENS must be a non-negative integer" >&2
+  exit 2
+}
+if [[ "$MTP_USE_LOCAL_ARGMAX_REDUCTION" == "1" && "$MTP_DRAFT_SAMPLE_METHOD" != "greedy" ]]; then
+  echo "local argmax reduction requires MTP_DRAFT_SAMPLE_METHOD=greedy" >&2
+  exit 2
+fi
+[[ -z "$profile_file" ]] || echo "Using performance profile: $profile_file"
 ssh_options=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 [[ -n "${SPARK_SSH_KEY:-}" ]] && ssh_options+=(-i "$SPARK_SSH_KEY")
 
@@ -85,7 +114,12 @@ remote_node() {
     "LOAD_FORMAT=$LOAD_FORMAT" "ENABLE_CHUNKED_PREFILL=$ENABLE_CHUNKED_PREFILL"
     "ENABLE_PREFIX_CACHING=$ENABLE_PREFIX_CACHING" "ASYNC_SCHEDULING=$ASYNC_SCHEDULING"
     "DISABLE_CUSTOM_ALL_REDUCE=$DISABLE_CUSTOM_ALL_REDUCE" "KERNEL_CONFIG=$KERNEL_CONFIG"
+    "COMPILATION_CONFIG=$COMPILATION_CONFIG" "VERIFY_CUDA_GRAPHS=$VERIFY_CUDA_GRAPHS"
     "MTP_SPECULATIVE_TOKENS=$MTP_SPECULATIVE_TOKENS"
+    "MTP_DRAFT_TP_SIZE=$MTP_DRAFT_TP_SIZE"
+    "MTP_USE_LOCAL_ARGMAX_REDUCTION=$MTP_USE_LOCAL_ARGMAX_REDUCTION"
+    "MTP_DRAFT_SAMPLE_METHOD=$MTP_DRAFT_SAMPLE_METHOD"
+    "MTP_REJECTION_SAMPLE_METHOD=$MTP_REJECTION_SAMPLE_METHOD"
     "KV_CACHE_DTYPE=$KV_CACHE_DTYPE" "KV_CACHE_MEMORY_BYTES=${KV_CACHE_MEMORY_BYTES:-}"
     "ENFORCE_EAGER=$ENFORCE_EAGER" "CONTAINER_MEMORY=$CONTAINER_MEMORY"
     "CONTAINER_SHM_SIZE=$CONTAINER_SHM_SIZE" "CONTAINER_NOFILE=$CONTAINER_NOFILE"
@@ -142,6 +176,27 @@ run_all_parallel() {
 
 stop_all() {
   run_all_parallel stop
+}
+
+benchmark_head() {
+  local head_management output_file profile_name
+  head_management="$(inventory_value 1 MANAGEMENT_IP)"
+  profile_name=baseline
+  [[ -z "$profile_file" ]] || profile_name="$(basename "$profile_file")"
+  mkdir -p "$root_dir/benchmarks/results"
+  output_file="$root_dir/benchmarks/results/$(date -u +%Y%m%dT%H%M%SZ)-glm53.json"
+  python3 "$root_dir/scripts/benchmark-glm53.py" \
+    --base-url "http://${head_management}:${API_PORT}/v1" \
+    --model "$SERVED_MODEL_NAME" \
+    --runs "$BENCHMARK_RUNS" \
+    --warmups "$BENCHMARK_WARMUPS" \
+    --prefill-words "$BENCHMARK_PREFILL_WORDS" \
+    --decode-tokens "$BENCHMARK_DECODE_TOKENS" \
+    --profile "$profile_name" \
+    --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
+    --mtp-tokens "$MTP_SPECULATIVE_TOKENS" \
+    --compilation-config "$COMPILATION_CONFIG" \
+    --output "$output_file"
 }
 
 start_all() {
@@ -204,6 +259,7 @@ case "$action" in
       EXPECTED_MAX_MODEL_LEN="$MAX_MODEL_LEN" \
       bash "$root_dir/scripts/smoke-test-glm53.sh"
     ;;
+  benchmark) benchmark_head ;;
   logs)
     if [[ -n "$selected_rank" ]]; then
       [[ "$selected_rank" =~ ^[0-3]$ ]] || { echo "rank must be 0-3" >&2; exit 2; }
@@ -213,7 +269,7 @@ case "$action" in
     fi
     ;;
   *)
-    echo "usage: $0 [build|prepare|preflight|start|stop|status|verify|logs [0-3]]" >&2
+    echo "usage: $0 [build|prepare|preflight|start|stop|status|verify|benchmark|logs [0-3]]" >&2
     exit 2
     ;;
 esac

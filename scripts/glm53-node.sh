@@ -14,7 +14,9 @@ required_env=(
   MAX_NUM_BATCHED_TOKENS QUANTIZATION LINEAR_BACKEND MOE_BACKEND
   KDA_PREFILL_BACKEND LOAD_FORMAT MTP_SPECULATIVE_TOKENS KV_CACHE_DTYPE
   ENABLE_CHUNKED_PREFILL ENABLE_PREFIX_CACHING ASYNC_SCHEDULING
-  DISABLE_CUSTOM_ALL_REDUCE KERNEL_CONFIG
+  DISABLE_CUSTOM_ALL_REDUCE KERNEL_CONFIG COMPILATION_CONFIG VERIFY_CUDA_GRAPHS
+  MTP_DRAFT_TP_SIZE MTP_USE_LOCAL_ARGMAX_REDUCTION MTP_DRAFT_SAMPLE_METHOD
+  MTP_REJECTION_SAMPLE_METHOD
   ENFORCE_EAGER CONTAINER_MEMORY CONTAINER_SHM_SIZE CONTAINER_NOFILE NCCL_IB_GID_INDEX
   NCCL_IB_ADDR_RANGE NCCL_DEBUG PULL_IMAGE ALLOW_UNVERIFIED_MODEL
   INSTANTTENSOR_BACKEND INSTANTTENSOR_BUFFER_SIZE INSTANTTENSOR_CONCURRENCY
@@ -153,6 +155,18 @@ PY
       return 1
     }
   done
+  if [[ -n "$COMPILATION_CONFIG" ]]; then
+    grep -Fq -- "--compilation-config" <<<"$serve_help" || {
+      echo "image does not support CUDA graph compilation configuration" >&2
+      return 1
+    }
+  fi
+  if (( MTP_SPECULATIVE_TOKENS > 0 )); then
+    grep -Fq -- "--speculative-config" <<<"$serve_help" || {
+      echo "image does not support MTP speculative decoding" >&2
+      return 1
+    }
+  fi
   echo "rank=$rank preflight ok host=$host_ip iface=$iface hca=$hca"
 }
 
@@ -198,6 +212,7 @@ start_node() {
     --master-port "$MASTER_PORT"
   )
   [[ "$ENFORCE_EAGER" == "1" ]] && serve_args+=(--enforce-eager)
+  [[ -z "$COMPILATION_CONFIG" ]] || serve_args+=(--compilation-config "$COMPILATION_CONFIG")
   [[ "$ENABLE_CHUNKED_PREFILL" == "1" ]] && serve_args+=(--enable-chunked-prefill)
   [[ "$ENABLE_PREFIX_CACHING" == "1" ]] && serve_args+=(--enable-prefix-caching)
   [[ "$ASYNC_SCHEDULING" == "1" ]] && serve_args+=(--async-scheduling)
@@ -205,7 +220,9 @@ start_node() {
   [[ "$KV_CACHE_DTYPE" == "auto" ]] || serve_args+=(--kv-cache-dtype "$KV_CACHE_DTYPE")
   [[ -z "${KV_CACHE_MEMORY_BYTES:-}" ]] || serve_args+=(--kv-cache-memory-bytes "$KV_CACHE_MEMORY_BYTES")
   if (( MTP_SPECULATIVE_TOKENS > 0 )); then
-    serve_args+=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":4,\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"probabilistic\",\"rejection_sample_method\":\"standard\"}")
+    local local_argmax=false
+    [[ "$MTP_USE_LOCAL_ARGMAX_REDUCTION" == "1" ]] && local_argmax=true
+    serve_args+=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\",\"rejection_sample_method\":\"$MTP_REJECTION_SAMPLE_METHOD\"}")
   fi
   serve_args+=("${headless[@]}")
 
@@ -222,6 +239,8 @@ start_node() {
     -e HF_HOME=/cache/huggingface \
     -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 \
     -e VLLM_NO_USAGE_STATS=1 -e TORCH_USE_RTLD_GLOBAL=1 \
+    -e "SPARK_DEPLOYMENT_VERIFY_CUDA_GRAPHS=$VERIFY_CUDA_GRAPHS" \
+    -e "SPARK_DEPLOYMENT_MTP_TOKENS=$MTP_SPECULATIVE_TOKENS" \
     -e VLLM_ENGINE_READY_TIMEOUT_S=3600 \
     -e VLLM_USE_AOT_COMPILE=1 -e TORCHINDUCTOR_COMPILE_THREADS=1 \
     -e OMP_NUM_THREADS=16 \
@@ -274,6 +293,16 @@ verify_node() {
     printf '%s\n' "$fatal_lines" >&2
     return 1
   }
+  if [[ "$rank" == "0" && "$VERIFY_CUDA_GRAPHS" == "1" ]]; then
+    local graph_lines
+    graph_lines="$(docker logs "$CONTAINER_NAME" 2>&1 \
+      | grep -Ei 'Capturing CUDA graph|CUDA graph capture|Graph capturing finished' || true)"
+    [[ -n "$graph_lines" ]] || {
+      echo "rank=0 has no evidence that CUDA graph capture ran" >&2
+      echo "inspect the full log for a backend downgrade or eager fallback" >&2
+      return 1
+    }
+  fi
   echo "rank=$rank verify ok state=$state oom=$oom restarts=$restarts"
 }
 
