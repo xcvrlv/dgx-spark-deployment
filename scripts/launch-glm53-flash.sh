@@ -88,7 +88,8 @@ remote_node() {
     "MTP_SPECULATIVE_TOKENS=$MTP_SPECULATIVE_TOKENS"
     "KV_CACHE_DTYPE=$KV_CACHE_DTYPE" "KV_CACHE_MEMORY_BYTES=${KV_CACHE_MEMORY_BYTES:-}"
     "ENFORCE_EAGER=$ENFORCE_EAGER" "CONTAINER_MEMORY=$CONTAINER_MEMORY"
-    "CONTAINER_SHM_SIZE=$CONTAINER_SHM_SIZE" "FABRIC_IFACE=${FABRIC_IFACE:-}"
+    "CONTAINER_SHM_SIZE=$CONTAINER_SHM_SIZE" "CONTAINER_NOFILE=$CONTAINER_NOFILE"
+    "FABRIC_IFACE=${FABRIC_IFACE:-}"
     "NCCL_IB_HCA=${NCCL_IB_HCA:-}" "NCCL_IB_GID_INDEX=$NCCL_IB_GID_INDEX"
     "NCCL_IB_ADDR_RANGE=$NCCL_IB_ADDR_RANGE" "NCCL_DEBUG=$NCCL_DEBUG"
     "PULL_IMAGE=$PULL_IMAGE" "ALLOW_UNVERIFIED_MODEL=$ALLOW_UNVERIFIED_MODEL"
@@ -161,6 +162,11 @@ start_all() {
   deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
   echo "Waiting up to ${HEALTH_TIMEOUT_SECONDS}s for http://${head_management}:${API_PORT}/health ..."
   until curl --silent --show-error --fail --max-time 5 "http://${head_management}:${API_PORT}/health" >/dev/null 2>&1; do
+    if ! run_all_parallel running; then
+      echo "one or more ranks exited before the health endpoint became ready" >&2
+      run_all_parallel status >&2 || true
+      return 1
+    fi
     if (( SECONDS >= deadline )); then
       echo "health check timed out; recent head logs follow" >&2
       remote_node logs 0 >&2 || true

@@ -51,7 +51,7 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertEqual(recipe["KV_CACHE_MEMORY_BYTES"], "8589934592")
         self.assertEqual(recipe["QUANTIZATION"], "modelopt_mixed")
         self.assertEqual(recipe["LINEAR_BACKEND"], "flashinfer_b12x")
-        self.assertEqual(recipe["MOE_BACKEND"], "flashinfer_cutlass")
+        self.assertEqual(recipe["MOE_BACKEND"], "marlin")
         self.assertEqual(recipe["KDA_PREFILL_BACKEND"], "flashkda")
         self.assertEqual(recipe["BLOCK_SIZE"], "256")
         self.assertEqual(recipe["CLUSTER_RAIL"], "CX0")
@@ -59,6 +59,7 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertEqual(recipe["PULL_IMAGE"], "0")
         self.assertEqual(recipe["ALLOW_UNVERIFIED_MODEL"], "0")
         self.assertEqual(recipe["RUN_SMOKE_TEST"], "1")
+        self.assertEqual(recipe["CONTAINER_NOFILE"], "1048576")
 
     def test_launcher_is_worker_first_and_tears_down_every_rank(self) -> None:
         launcher = (ROOT / "scripts/launch-glm53-flash.sh").read_text()
@@ -93,6 +94,7 @@ class DeploymentStaticTests(unittest.TestCase):
             "NCCL_NVLS_ENABLE=0",
             "TORCH_CUDA_ARCH_LIST=12.1a",
             "FLASHINFER_CUDA_ARCH_LIST=12.1f",
+            '--ulimit "nofile=$CONTAINER_NOFILE:$CONTAINER_NOFILE"',
             "--quantization",
             "--linear-backend",
             "--kda-prefill-backend",
@@ -105,8 +107,9 @@ class DeploymentStaticTests(unittest.TestCase):
         for fragment in required:
             self.assertIn(fragment, node)
         self.assertIn('-v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro"', node)
+        self.assertIn('model is not readable in the container at $MODEL_CONTAINER_PATH', node)
         self.assertIn(
-            'docker run --rm --gpus all --entrypoint vllm "$IMAGE" serve --help',
+            'docker run --rm --gpus all --entrypoint vllm "$IMAGE" serve --help=all',
             node,
         )
 

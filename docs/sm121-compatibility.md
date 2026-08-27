@@ -33,6 +33,12 @@ top of vLLM's pinned ARM64 CUDA 13.0 day-zero image:
 6. Cap the FP8 MLA tile to the shared-memory size selected for GB10 and admit
    capability 12 in FlashInfer's wrapper.
 7. Install InstantTensor for direct-I/O weight loading, then re-pin NCCL.
+8. Raise the container `nofile` limit to 1,048,576. InstantTensor shard loading
+   and NCCL connection setup can otherwise exhaust Docker's inherited limit and
+   fail the entire TP group with `ncclOsSocketTryAccept: Too many open files`.
+9. Use Marlin for NVFP4 MoE in the first iteration. FlashInfer CUTLASS triggers
+   a 97-object `fused_moe_120` JIT on SM121 and has also produced silently
+   incorrect repeated-token output in independent GLM-5.3 Spark deployments.
 
 Every source edit is guarded and the image build fails when its expected
 upstream source no longer matches. That is intentional: a changed upstream

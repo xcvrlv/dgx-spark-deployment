@@ -15,7 +15,7 @@ required_env=(
   KDA_PREFILL_BACKEND LOAD_FORMAT MTP_SPECULATIVE_TOKENS KV_CACHE_DTYPE
   ENABLE_CHUNKED_PREFILL ENABLE_PREFIX_CACHING ASYNC_SCHEDULING
   DISABLE_CUSTOM_ALL_REDUCE KERNEL_CONFIG
-  ENFORCE_EAGER CONTAINER_MEMORY CONTAINER_SHM_SIZE NCCL_IB_GID_INDEX
+  ENFORCE_EAGER CONTAINER_MEMORY CONTAINER_SHM_SIZE CONTAINER_NOFILE NCCL_IB_GID_INDEX
   NCCL_IB_ADDR_RANGE NCCL_DEBUG PULL_IMAGE ALLOW_UNVERIFIED_MODEL
   INSTANTTENSOR_BACKEND INSTANTTENSOR_BUFFER_SIZE INSTANTTENSOR_CONCURRENCY
   INSTANTTENSOR_IO_DEPTH INSTANTTENSOR_CHUNK_SIZE
@@ -136,8 +136,17 @@ PY
     'import torch; cap=torch.cuda.get_device_capability(); assert cap == (12, 1), cap; print("SM%d%d" % cap)' \
     >/dev/null
 
+  docker run --rm --entrypoint sh \
+    -v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro" \
+    "$IMAGE" -c 'test -f "$1/config.json" && test -f "$1/model.safetensors.index.json"' \
+    _ "$MODEL_CONTAINER_PATH" || {
+      echo "model is not readable in the container at $MODEL_CONTAINER_PATH" >&2
+      echo "check MODEL_MOUNT_HOST_PATH, MODEL_MOUNT_CONTAINER_PATH, and MODEL_CONTAINER_PATH" >&2
+      return 1
+    }
+
   local serve_help
-  serve_help="$(docker run --rm --gpus all --entrypoint vllm "$IMAGE" serve --help)"
+  serve_help="$(docker run --rm --gpus all --entrypoint vllm "$IMAGE" serve --help=all)"
   for flag in --linear-backend --moe-backend --kda-prefill-backend --kv-cache-memory-bytes; do
     grep -Fq -- "$flag" <<<"$serve_help" || {
       echo "image does not support required vLLM flag: $flag" >&2
@@ -204,7 +213,8 @@ start_node() {
     --name "$CONTAINER_NAME" --restart no --init \
     --network host --ipc host --shm-size "$CONTAINER_SHM_SIZE" \
     --memory "$CONTAINER_MEMORY" --memory-swap "$CONTAINER_MEMORY" \
-    --ulimit memlock=-1:-1 --cap-add IPC_LOCK \
+    --ulimit memlock=-1:-1 --ulimit "nofile=$CONTAINER_NOFILE:$CONTAINER_NOFILE" \
+    --cap-add IPC_LOCK \
     --device /dev/infiniband:/dev/infiniband \
     -v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro" \
     -v "$CACHE_HOST_PATH:/cache" \
@@ -278,6 +288,13 @@ case "$action" in
     ;;
   status)
     docker ps -a --filter "name=^/${CONTAINER_NAME}$" --format 'rank='"$rank"' {{.Names}} {{.Status}}'
+    ;;
+  running)
+    state="$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+    [[ "$state" == "running" ]] || {
+      echo "rank=$rank container_state=${state:-missing}" >&2
+      exit 1
+    }
     ;;
   verify) verify_node ;;
   logs)
