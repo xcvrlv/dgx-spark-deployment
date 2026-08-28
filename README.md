@@ -192,3 +192,27 @@ treated as a checkpoint swap: its release and EXL3 tensor contract must be
 verified before changing this recipe. See
 [`docs/glm52-exl3-sm121.md`](docs/glm52-exl3-sm121.md) for provenance,
 limitations, and the promotion gates.
+
+## SparkRing-compatible switched GLM serving target
+
+The target topology now has a separate launch path which preserves
+SparkRing's GLM-5.2 serving contract while replacing its direct-cycle
+SIRCL transport with NCCL over the switched, dual-rail RoCE fabric. It uses
+TP4/DCP4 `ag_rs`, fixed MTP4, 1M context, 16 sequences, dynamic NVFP4 DS-MLA,
+a 9.25 GB/rank KV slab, full-CKV gather, Q1-Q40 graphs, and image-bound
+exact-Q40 overlays.
+
+```bash
+# Create .env.sparkring-switch from .env.example and set its SSH user and the
+# audited SPARKRING_BASE_IMAGE_LICENSES value. `prepare` builds/distributes the
+# runtime and downloads/verifies the model.
+bash scripts/launch-glm52-sparkring-switch.sh prepare
+bash scripts/launch-glm52-sparkring-switch.sh preflight
+bash scripts/launch-glm52-sparkring-switch.sh start
+```
+
+This path is implemented but not fleet-qualified. The current GLM-5.2
+checkpoint is a reproducible stand-in; a future model candidate requires a
+new immutable serving contract and model-specific Q40 validation, not merely a
+checkpoint-name change. See
+[`docs/glm52-sparkring-switch.md`](docs/glm52-sparkring-switch.md).

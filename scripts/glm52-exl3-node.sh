@@ -9,16 +9,26 @@ head_ip="${4:?missing head IP}"
 required_env=(
   IMAGE CONTAINER_NAME MODEL_ID MODEL_REVISION MODEL_HOST_PATH MODEL_MOUNT_HOST_PATH
   MODEL_MOUNT_CONTAINER_PATH MODEL_CONTAINER_PATH CACHE_HOST_PATH LOG_HOST_PATH
+  MODEL_CONFIG_SHA256 MODEL_INDEX_SHA256 MODEL_SHARD_COUNT MODEL_INDEX_TOTAL_SIZE
+  RUNTIME_CONTRACT SPARKRING_UPSTREAM_COMMIT Q40_ENABLED Q40_HOST_PATH Q40_EXL3_SHA256
   SERVED_MODEL_NAME API_PORT MASTER_PORT MAX_MODEL_LEN MAX_NUM_SEQS
   MAX_NUM_BATCHED_TOKENS GPU_MEMORY_UTILIZATION QUANTIZATION ATTENTION_BACKEND
   LINEAR_BACKEND MOE_BACKEND LOAD_FORMAT ONLINE_QUANT ONLINE_QUANT_CONFIG
   VLLM_EXL3_PREFILL_CAPACITY B12X_PCIE_DMA MTP_SPECULATIVE_TOKENS
   MTP_DRAFT_TP_SIZE MTP_MOE_BACKEND MTP_USE_LOCAL_ARGMAX_REDUCTION
   MTP_DRAFT_SAMPLE_METHOD MTP_REJECTION_SAMPLE_METHOD KV_CACHE_DTYPE
+  DECODE_CONTEXT_PARALLEL_SIZE DCP_COMM_BACKEND DCP_KV_CACHE_INTERLEAVE_SIZE
+  HF_OVERRIDES MAX_CUDAGRAPH_CAPTURE_SIZE KV_FP8_ROPE
+  VLLM_NVFP4_MLA_DYNAMIC_SCALE VLLM_USE_B12X_DCP_A2A
+  VLLM_B12X_MLA_CKV_GATHER VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS
+  VLLM_SPARK_MAX_QUERY_ROWS VLLM_SPARK_MTP_MODE_ID VLLM_SPARK_MTP_TOKENS
+  VLLM_SPARK_SHARED_CAPTURE_STREAM
   ENABLE_CHUNKED_PREFILL ENABLE_PREFIX_CACHING ASYNC_SCHEDULING
   DISABLE_CUSTOM_ALL_REDUCE COMPILATION_CONFIG VERIFY_CUDA_GRAPHS ENFORCE_EAGER
   CONTAINER_MEMORY CONTAINER_SHM_SIZE CONTAINER_NOFILE NCCL_IB_GID_INDEX
-  NCCL_IB_ADDR_RANGE NCCL_DEBUG PULL_IMAGE ALLOW_UNVERIFIED_MODEL
+  NCCL_IB_ADDR_RANGE NCCL_DEBUG NETWORK_TOPOLOGY NCCL_CROSS_NIC
+  NCCL_IB_MERGE_NICS NCCL_IB_SUBNET_AWARE_ROUTING NCCL_MIN_NCHANNELS
+  NCCL_MAX_NCHANNELS NCCL_ALGO PULL_IMAGE ALLOW_UNVERIFIED_MODEL
   INSTANTTENSOR_BACKEND INSTANTTENSOR_COPY INSTANTTENSOR_BUFFER_SIZE
   INSTANTTENSOR_CONCURRENCY INSTANTTENSOR_IO_DEPTH INSTANTTENSOR_CHUNK_SIZE
   INSTANTTENSOR_MAX_FREE_MEM_USAGE
@@ -55,6 +65,19 @@ resolve_hca() {
   printf '%s\n' "$hca"
 }
 
+validate_hcas() {
+  local hca_list="$1" raw_hca hca
+  local -a configured_hcas=()
+  IFS=',' read -r -a configured_hcas <<<"$hca_list"
+  for raw_hca in "${configured_hcas[@]}"; do
+    hca="${raw_hca%%:*}"
+    [[ -d "/sys/class/infiniband/$hca" ]] || {
+      echo "configured RDMA HCA is absent: $hca" >&2
+      return 1
+    }
+  done
+}
+
 capture_logs() {
   if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     mkdir -p "$LOG_HOST_PATH"
@@ -70,11 +93,23 @@ prepare_node() {
   else
     docker image inspect "$IMAGE" >/dev/null
   fi
-  docker run --rm --network host --entrypoint bash \
-    -v "$MODEL_HOST_PATH:/model" -v "$CACHE_HOST_PATH:/cache" \
-    -e HF_HOME=/cache/huggingface "$IMAGE" -lc \
-    'hf download "$1" --revision "$2" --local-dir /model' \
-    _ "$MODEL_ID" "$MODEL_REVISION"
+  if [[ "$RUNTIME_CONTRACT" == "sparkring-r7-switch-q40" ]]; then
+    test -f "$Q40_HOST_PATH/download_exl3_r7.py"
+    docker run --rm --network host \
+      --entrypoint /opt/venv/bin/python \
+      -v "$MODEL_HOST_PATH:/model" \
+      -v "$Q40_HOST_PATH/download_exl3_r7.py:/opt/spark-deployment/download_exl3_r7.py:ro" \
+      -v "$CACHE_HOST_PATH:/cache" \
+      -e HF_HOME=/cache/huggingface \
+      "$IMAGE" /opt/spark-deployment/download_exl3_r7.py download \
+      --model-path /model
+  else
+    docker run --rm --network host --entrypoint bash \
+      -v "$MODEL_HOST_PATH:/model" -v "$CACHE_HOST_PATH:/cache" \
+      -e HF_HOME=/cache/huggingface "$IMAGE" -lc \
+      'hf download "$1" --revision "$2" --local-dir /model' \
+      _ "$MODEL_ID" "$MODEL_REVISION"
+  fi
   test -f "$MODEL_HOST_PATH/config.json"
   test -f "$MODEL_HOST_PATH/model.safetensors.index.json"
   printf '%s\n' "$MODEL_REVISION" >"$MODEL_HOST_PATH/.spark-deployment-revision"
@@ -90,13 +125,23 @@ preflight_node() {
   test -f "$MODEL_HOST_PATH/model.safetensors.index.json"
   test -d /dev/infiniband
 
-  python3 - "$MODEL_HOST_PATH" <<'PY'
+  python3 - "$MODEL_HOST_PATH" "$MODEL_CONFIG_SHA256" "$MODEL_INDEX_SHA256" \
+    "$MODEL_SHARD_COUNT" "$MODEL_INDEX_TOTAL_SIZE" <<'PY'
+import hashlib
 import json
 import sys
 from pathlib import Path
 
 model_dir = Path(sys.argv[1])
-config = json.loads((model_dir / "config.json").read_text())
+expected_config_sha, expected_index_sha = sys.argv[2:4]
+expected_shards, expected_total_size = sys.argv[4:6]
+config_path = model_dir / "config.json"
+index_path = model_dir / "model.safetensors.index.json"
+if expected_config_sha and hashlib.sha256(config_path.read_bytes()).hexdigest() != expected_config_sha:
+    raise SystemExit("model config SHA-256 mismatch")
+if expected_index_sha and hashlib.sha256(index_path.read_bytes()).hexdigest() != expected_index_sha:
+    raise SystemExit("model index SHA-256 mismatch")
+config = json.loads(config_path.read_text())
 tail = config.get("hybrid_tr3_tail", {})
 if tail.get("format") != "exl3-trellis":
     raise SystemExit(f"unexpected EXL3 format: {tail.get('format')!r}")
@@ -104,18 +149,32 @@ if tail.get("tp") != 4:
     raise SystemExit(f"checkpoint is not rank-sliced for TP4: {tail.get('tp')!r}")
 if config.get("num_nextn_predict_layers") != 1:
     raise SystemExit("checkpoint does not expose the expected MTP78 layer")
-index = json.loads((model_dir / "model.safetensors.index.json").read_text())
+index = json.loads(index_path.read_text())
 shards = sorted(set(index.get("weight_map", {}).values()))
 if not shards:
     raise SystemExit("model index has no weight shards")
+if expected_shards and len(shards) != int(expected_shards):
+    raise SystemExit(f"model shard count mismatch: expected {expected_shards}, got {len(shards)}")
+reported_total = index.get("metadata", {}).get("total_size")
+if expected_total_size and reported_total != int(expected_total_size):
+    raise SystemExit(
+        f"model index total_size mismatch: expected {expected_total_size}, got {reported_total}"
+    )
 missing = [name for name in shards if not (model_dir / name).is_file()]
 if missing:
     raise SystemExit(f"model is missing {len(missing)} shard(s): {missing[:5]}")
 PY
 
-  local iface hca installed_revision image_arch vllm_tree b12x_tree
+  local iface hca installed_revision image_arch vllm_tree b12x_tree image_id
   iface="$(resolve_fabric_iface)"
   hca="$(resolve_hca "$iface")"
+  validate_hcas "$hca"
+  local iface_mtu
+  iface_mtu="$(<"/sys/class/net/$iface/mtu")"
+  (( iface_mtu >= 9000 )) || {
+    echo "fabric interface $iface has MTU $iface_mtu; switched profile requires at least 9000" >&2
+    return 1
+  }
   if [[ -f "$MODEL_HOST_PATH/.spark-deployment-revision" ]]; then
     installed_revision="$(<"$MODEL_HOST_PATH/.spark-deployment-revision")"
     [[ "$installed_revision" == "$MODEL_REVISION" ]] || {
@@ -129,17 +188,60 @@ PY
 
   image_arch="$(docker image inspect "$IMAGE" --format '{{.Architecture}}')"
   [[ "$image_arch" == "arm64" ]] || { echo "EXL3 image must be arm64, got $image_arch" >&2; return 1; }
-  vllm_tree="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "local-inference.vllm.integration.tree"}}')"
-  b12x_tree="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "local-inference.b12x.integration.tree"}}')"
-  [[ "$vllm_tree" == "b0f8c85c7b96497e0148a18230f43d18854ae04a" ]] || {
-    echo "unexpected vLLM integration tree: $vllm_tree" >&2; return 1;
-  }
-  [[ "$b12x_tree" == "cd3ce190f0f1917402cdfd5773724267cc9a63f8" ]] || {
-    echo "unexpected B12X integration tree: $b12x_tree" >&2; return 1;
-  }
+  image_id="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
+  case "$RUNTIME_CONTRACT" in
+    local-inference)
+      vllm_tree="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "local-inference.vllm.integration.tree"}}')"
+      b12x_tree="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "local-inference.b12x.integration.tree"}}')"
+      [[ "$vllm_tree" == "b0f8c85c7b96497e0148a18230f43d18854ae04a" ]] || {
+        echo "unexpected vLLM integration tree: $vllm_tree" >&2; return 1;
+      }
+      [[ "$b12x_tree" == "cd3ce190f0f1917402cdfd5773724267cc9a63f8" ]] || {
+        echo "unexpected B12X integration tree: $b12x_tree" >&2; return 1;
+      }
+      ;;
+    sparkring-r7-switch-q40)
+      local image_revision
+      image_revision="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+      [[ -n "$SPARKRING_UPSTREAM_COMMIT" && "$image_revision" == "$SPARKRING_UPSTREAM_COMMIT" ]] || {
+        echo "SparkRing image revision mismatch: have $image_revision, want $SPARKRING_UPSTREAM_COMMIT" >&2
+        return 1
+      }
+      docker run --rm --gpus all "$IMAGE" /bin/true >/dev/null
+      ;;
+    *) echo "unsupported RUNTIME_CONTRACT=$RUNTIME_CONTRACT" >&2; return 1 ;;
+  esac
+
+  if [[ "$Q40_ENABLED" == "1" ]]; then
+    test -f "$Q40_HOST_PATH/download_exl3_r7.py"
+    test -f "$Q40_HOST_PATH/exl3.py"
+    test -f "$Q40_HOST_PATH/model_runner.py"
+    test -f "$Q40_HOST_PATH/manifest.json"
+    python3 - "$Q40_HOST_PATH" "$image_id" "$MODEL_REVISION" "$Q40_EXL3_SHA256" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+manifest = json.loads((root / "manifest.json").read_text())
+if manifest.get("schema") != "spark-deployment-sparkring-q40/v1":
+    raise SystemExit("Q40 manifest schema mismatch")
+if manifest.get("image_id") != sys.argv[2]:
+    raise SystemExit("Q40 bundle was generated for a different image ID")
+if manifest.get("model_revision") != sys.argv[3]:
+    raise SystemExit("Q40 bundle was generated for a different model revision")
+for name in ("download_exl3_r7.py", "exl3.py", "model_runner.py"):
+    digest = hashlib.sha256((root / name).read_bytes()).hexdigest()
+    if manifest.get("files", {}).get(name, {}).get("sha256") != digest:
+        raise SystemExit(f"Q40 {name} hash mismatch")
+if sys.argv[4] and manifest["files"]["exl3.py"]["sha256"] != sys.argv[4]:
+    raise SystemExit("Q40 EXL3 contract hash mismatch")
+PY
+  fi
 
   docker run --rm --gpus all --entrypoint python3 "$IMAGE" -c \
-    'import importlib,sys,torch; cap=torch.cuda.get_device_capability(); assert cap == (12, 1), cap; import b12x,vllm; sys.path.insert(0,"/opt/exllamav3"); ext=importlib.import_module("exllamav3_ext"); assert hasattr(ext,"exl3_moe_fused_retile"); print("SM121 EXL3 imports ok")' \
+    'import importlib,sys,torch; cap=torch.cuda.get_device_capability(); assert cap == (12, 1), cap; import b12x,vllm; sys.path[:0]=["/opt/exllamav3","/opt/exllamav3-python"]; ext=importlib.import_module("exllamav3_ext"); assert hasattr(ext,"exl3_moe_fused_retile"); print("SM121 EXL3 imports ok")' \
     >/dev/null
   docker run --rm --entrypoint python3 "$IMAGE" -c \
     'from pathlib import Path; import vllm; root=Path(vllm.__file__).parent; assert (root / "model_executor/layers/quantization/exl3.py").is_file(); assert (root / "v1/attention/backends/mla/b12x_mla_sparse.py").is_file()' \
@@ -154,9 +256,27 @@ PY
 
   local serve_help
   serve_help="$(docker run --rm --gpus all --entrypoint vllm "$IMAGE" serve --help=all)"
-  for flag in --attention-backend --moe-backend --quantization-config --decode-context-parallel-size --nnodes --node-rank; do
+  for flag in --attention-backend --moe-backend --quantization-config --decode-context-parallel-size --nnodes --node-rank --block-size; do
     grep -Fq -- "$flag" <<<"$serve_help" || {
       echo "image does not support required vLLM flag: $flag" >&2
+      return 1
+    }
+  done
+  if (( DECODE_CONTEXT_PARALLEL_SIZE > 1 )); then
+    for flag in --dcp-comm-backend --dcp-kv-cache-interleave-size; do
+      grep -Fq -- "$flag" <<<"$serve_help" || {
+        echo "image does not support required DCP flag: $flag" >&2
+        return 1
+      }
+    done
+  fi
+  for configured_flag in \
+    "${HF_OVERRIDES:+--hf-overrides}" \
+    "${MAX_CUDAGRAPH_CAPTURE_SIZE:+--max-cudagraph-capture-size}" \
+    "${KV_CACHE_MEMORY_BYTES:+--kv-cache-memory-bytes}"; do
+    [[ -z "$configured_flag" ]] && continue
+    grep -Fq -- "$configured_flag" <<<"$serve_help" || {
+      echo "image does not support configured vLLM flag: $configured_flag" >&2
       return 1
     }
   done
@@ -172,8 +292,36 @@ start_node() {
   local iface hca
   iface="$(resolve_fabric_iface)"
   hca="$(resolve_hca "$iface")"
-  local headless=()
+  local headless=() extra_mounts=() extra_env=() nccl_tuning_env=()
   [[ "$rank" == "0" ]] || headless=(--headless)
+
+  if [[ "$Q40_ENABLED" == "1" ]]; then
+    local receipt_path
+    receipt_path="$CACHE_HOST_PATH/jit/q40-exact-state-serving-v1-rank${rank}.json"
+    if [[ -f "$receipt_path" ]]; then
+      mv "$receipt_path" "${receipt_path}.backup.$(date -u +%Y%m%dT%H%M%SZ)"
+    fi
+    extra_mounts+=(
+      -v "$Q40_HOST_PATH/exl3.py:/opt/venv/lib/python3.12/site-packages/vllm/model_executor/layers/quantization/exl3.py:ro"
+      -v "$Q40_HOST_PATH/model_runner.py:/opt/venv/lib/python3.12/site-packages/vllm/v1/worker/gpu/model_runner.py:ro"
+    )
+    extra_env+=(
+      -e PYTHONPATH=/opt/sparkring-r7-tvm-ffi:/opt/spark-vllm
+      -e XDG_CACHE_HOME=/cache/jit
+      -e VLLM_CACHE_ROOT=/cache/jit/vllm-q40-exact-state-v1
+      -e VLLM_EXL3_EXT_PATH=/opt/exllamav3-python
+      -e "SPARK_Q40_EXACT_STATE_ATTEST_PATH=/cache/jit/q40-exact-state-serving-v1-rank${rank}.json"
+      -e "SPARK_Q40_EXACT_STATE_EXPECTED_EXL3_SHA256=$Q40_EXL3_SHA256"
+      -e "SPARK_Q40_EXACT_STATE_IMAGE_ID=$(docker image inspect "$IMAGE" --format '{{.Id}}')"
+      -e "SPARK_Q40_EXACT_STATE_CHECKPOINT=$MODEL_REVISION"
+      -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
+      -e VLLM_NCCL_SO_PATH=/opt/sparkring/nccl/libnccl.so.2
+    )
+  fi
+  [[ -z "$NCCL_ALGO" ]] || nccl_tuning_env+=(-e "NCCL_ALGO=$NCCL_ALGO")
+  [[ -z "$NCCL_MIN_NCHANNELS" ]] || nccl_tuning_env+=(-e "NCCL_MIN_NCHANNELS=$NCCL_MIN_NCHANNELS")
+  [[ -z "$NCCL_MAX_NCHANNELS" ]] || nccl_tuning_env+=(-e "NCCL_MAX_NCHANNELS=$NCCL_MAX_NCHANNELS")
+  [[ -z "$NCCL_IB_ADDR_RANGE" ]] || nccl_tuning_env+=(-e "NCCL_IB_ADDR_RANGE=$NCCL_IB_ADDR_RANGE")
 
   local serve_args=(
     "$MODEL_CONTAINER_PATH"
@@ -182,11 +330,12 @@ start_node() {
     --port "$API_PORT"
     --trust-remote-code
     --tensor-parallel-size 4
-    --decode-context-parallel-size 1
+    --decode-context-parallel-size "$DECODE_CONTEXT_PARALLEL_SIZE"
     --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
     --max-model-len "$MAX_MODEL_LEN"
     --max-num-seqs "$MAX_NUM_SEQS"
     --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS"
+    --block-size "$BLOCK_SIZE"
     --quantization "$QUANTIZATION"
     --attention-backend "$ATTENTION_BACKEND"
     --moe-backend "$MOE_BACKEND"
@@ -206,9 +355,14 @@ start_node() {
     --master-port "$MASTER_PORT"
   )
   [[ "$LINEAR_BACKEND" == "auto" ]] || serve_args+=(--linear-backend "$LINEAR_BACKEND")
+  [[ -z "$DCP_COMM_BACKEND" ]] || serve_args+=(--dcp-comm-backend "$DCP_COMM_BACKEND")
+  [[ -z "$DCP_KV_CACHE_INTERLEAVE_SIZE" ]] || serve_args+=(--dcp-kv-cache-interleave-size "$DCP_KV_CACHE_INTERLEAVE_SIZE")
+  [[ -z "$HF_OVERRIDES" ]] || serve_args+=(--hf-overrides "$HF_OVERRIDES")
   [[ "$ONLINE_QUANT" == "none" ]] || serve_args+=(--quantization-config "$ONLINE_QUANT_CONFIG")
   [[ "$ENFORCE_EAGER" == "1" ]] && serve_args+=(--enforce-eager)
   [[ -z "$COMPILATION_CONFIG" ]] || serve_args+=(--compilation-config "$COMPILATION_CONFIG")
+  [[ -z "$MAX_CUDAGRAPH_CAPTURE_SIZE" ]] || serve_args+=(--max-cudagraph-capture-size "$MAX_CUDAGRAPH_CAPTURE_SIZE")
+  [[ -z "${KV_CACHE_MEMORY_BYTES:-}" ]] || serve_args+=(--kv-cache-memory-bytes "$KV_CACHE_MEMORY_BYTES")
   [[ "$ENABLE_CHUNKED_PREFILL" == "1" ]] && serve_args+=(--enable-chunked-prefill)
   [[ "$ENABLE_PREFIX_CACHING" == "1" ]] && serve_args+=(--enable-prefix-caching)
   if [[ "$ASYNC_SCHEDULING" == "1" ]]; then
@@ -220,9 +374,16 @@ start_node() {
   if (( MTP_SPECULATIVE_TOKENS > 0 )); then
     local local_argmax=false
     [[ "$MTP_USE_LOCAL_ARGMAX_REDUCTION" == "1" ]] && local_argmax=true
-    serve_args+=(--speculative-config "{\"model\":\"$MODEL_CONTAINER_PATH\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"moe_backend\":\"$MTP_MOE_BACKEND\",\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\",\"rejection_sample_method\":\"$MTP_REJECTION_SAMPLE_METHOD\"}")
+    if [[ "$RUNTIME_CONTRACT" == "sparkring-r7-switch-q40" ]]; then
+      serve_args+=(--speculative-config "{\"model\":\"$MODEL_CONTAINER_PATH\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"quantization\":\"exl3\",\"moe_backend\":\"$MTP_MOE_BACKEND\",\"attention_backend\":\"$ATTENTION_BACKEND\",\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\"}")
+    else
+      serve_args+=(--speculative-config "{\"model\":\"$MODEL_CONTAINER_PATH\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"moe_backend\":\"$MTP_MOE_BACKEND\",\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\",\"rejection_sample_method\":\"$MTP_REJECTION_SAMPLE_METHOD\"}")
+    fi
   fi
   serve_args+=("${headless[@]}")
+  if [[ "$RUNTIME_CONTRACT" == "sparkring-r7-switch-q40" ]]; then
+    serve_args=(serve "${serve_args[@]}")
+  fi
 
   docker run --gpus all -d \
     --name "$CONTAINER_NAME" --restart no --init \
@@ -232,6 +393,7 @@ start_node() {
     --cap-add IPC_LOCK --device /dev/infiniband:/dev/infiniband \
     -v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro" \
     -v "$CACHE_HOST_PATH:/cache" \
+    "${extra_mounts[@]}" \
     -e "VLLM_HOST_IP=$host_ip" \
     -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 -e VLLM_NO_USAGE_STATS=1 \
     -e TORCH_USE_RTLD_GLOBAL=1 \
@@ -246,16 +408,28 @@ start_node() {
     -e VLLM_USE_B12X_WO_PROJECTION=1 -e VLLM_USE_B12X_MHC=1 \
     -e VLLM_USE_B12X_FP8_GEMM=1 -e VLLM_USE_B12X_MOE=1 \
     -e VLLM_USE_B12X_SPARSE_INDEXER=1 -e VLLM_B12X_ABSORB_BMM=0 \
+    -e B12X_DENSE_SPLITK_TURBO=1 -e B12X_W4A16_TC_DECODE=1 \
+    -e B12X_W4A8_TINY_DECODE=1 -e MOE_MODE=a16 \
     -e B12X_MOE_FORCE_A8=0 -e B12X_MOE_FORCE_A16=1 \
     -e B12X_MLA_SM120_UNIFIED=1 -e "B12X_PCIE_DMA=$B12X_PCIE_DMA" \
     -e VLLM_USE_B12X_PCIE_DMA=0 -e VLLM_ENABLE_PCIE_ALLREDUCE=0 \
     -e VLLM_PCIE_DMA_FP8=0 -e B12X_PCIE_DMA_FP8=0 \
     -e VLLM_DCP_GLOBAL_TOPK=1 -e VLLM_DCP_SHARD_DRAFT=1 \
+    -e "VLLM_USE_B12X_DCP_A2A=$VLLM_USE_B12X_DCP_A2A" \
+    -e "VLLM_SPARK_MAX_QUERY_ROWS=$VLLM_SPARK_MAX_QUERY_ROWS" \
+    -e "VLLM_SPARK_MTP_MODE_ID=$VLLM_SPARK_MTP_MODE_ID" \
+    -e "VLLM_SPARK_MTP_TOKENS=$VLLM_SPARK_MTP_TOKENS" \
+    -e "VLLM_SPARK_SHARED_CAPTURE_STREAM=$VLLM_SPARK_SHARED_CAPTURE_STREAM" \
+    -e "KV_FP8_ROPE=$KV_FP8_ROPE" \
+    -e "VLLM_NVFP4_MLA_DYNAMIC_SCALE=$VLLM_NVFP4_MLA_DYNAMIC_SCALE" \
+    -e "VLLM_B12X_MLA_CKV_GATHER=$VLLM_B12X_MLA_CKV_GATHER" \
+    -e "VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS=$VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS" \
     -e VLLM_EXL3_ONLINE_TRELLIS_BITS=6 \
     -e VLLM_EXL3_EXT_PATH=/opt/exllamav3 \
     -e VLLM_EXL3_ENCODER_SOURCE=/opt/exllamav3-python/exllamav3 \
     -e VLLM_EXL3_ONLINE_CACHE_DIR=/cache/exl3-online \
     -e VLLM_EXL3_ONLINE_CACHE_MODE=readwrite \
+    -e "ONLINE_QUANT=$ONLINE_QUANT" \
     -e "VLLM_EXL3_PREFILL_CAPACITY=$VLLM_EXL3_PREFILL_CAPACITY" \
     -e VLLM_ENGINE_READY_TIMEOUT_S=7200 -e TORCHINDUCTOR_COMPILE_THREADS=1 \
     -e OMP_NUM_THREADS=16 -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
@@ -268,10 +442,12 @@ start_node() {
     -e "INSTANTTENSOR_MAX_FREE_MEM_USAGE=$INSTANTTENSOR_MAX_FREE_MEM_USAGE" \
     -e NCCL_NET=IB -e NCCL_IB_DISABLE=0 -e "NCCL_IB_HCA=$hca" \
     -e "NCCL_IB_GID_INDEX=$NCCL_IB_GID_INDEX" -e NCCL_IB_ROCE_VERSION_NUM=2 \
-    -e NCCL_IB_ADDR_FAMILY=AF_INET -e "NCCL_IB_ADDR_RANGE=$NCCL_IB_ADDR_RANGE" \
+    -e NCCL_IB_ADDR_FAMILY=AF_INET \
     -e "NCCL_SOCKET_IFNAME=$iface" -e "GLOO_SOCKET_IFNAME=$iface" \
     -e "TP_SOCKET_IFNAME=$iface" -e "MN_IF_NAME=$iface" \
-    -e NCCL_NVLS_ENABLE=0 -e NCCL_CROSS_NIC=0 -e NCCL_IB_MERGE_NICS=0 \
+    -e NCCL_NVLS_ENABLE=0 -e "NCCL_CROSS_NIC=$NCCL_CROSS_NIC" \
+    -e "NCCL_IB_MERGE_NICS=$NCCL_IB_MERGE_NICS" \
+    -e "NCCL_IB_SUBNET_AWARE_ROUTING=$NCCL_IB_SUBNET_AWARE_ROUTING" \
     -e NCCL_CUMEM_ENABLE=0 -e NCCL_IGNORE_CPU_AFFINITY=1 \
     -e "NCCL_DEBUG=$NCCL_DEBUG" -e TORCH_NCCL_ASYNC_ERROR_HANDLING=1 \
     -e XDG_CACHE_HOME=/cache -e VLLM_CACHE_ROOT=/cache/vllm \
@@ -279,6 +455,7 @@ start_node() {
     -e TORCH_EXTENSIONS_DIR=/cache/torch_extensions \
     -e FLASHINFER_WORKSPACE_BASE=/cache/flashinfer \
     -e CUTE_DSL_CACHE_DIR=/cache/cute-dsl -e B12X_CUTE_COMPILE_CACHE_DIR=/cache/b12x-cute \
+    "${extra_env[@]}" "${nccl_tuning_env[@]}" \
     "$IMAGE" "${serve_args[@]}" >/dev/null
 
   sleep 2
@@ -300,6 +477,36 @@ verify_node() {
   fatal_lines="$(docker logs --since "${VERIFY_LOG_WINDOW:-30m}" "$CONTAINER_NAME" 2>&1 \
     | grep -Ei 'CUDA error|OutOfMemory|NCCL[^[:cntrl:]]*(error|failed)|Traceback \(most recent call last\)' || true)"
   [[ -z "$fatal_lines" ]] || { printf 'rank=%s fatal log lines:\n%s\n' "$rank" "$fatal_lines" >&2; return 1; }
+  if [[ "$Q40_ENABLED" == "1" ]]; then
+    local receipt_path image_id
+    receipt_path="$CACHE_HOST_PATH/jit/q40-exact-state-serving-v1-rank${rank}.json"
+    image_id="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
+    python3 - "$receipt_path" "$rank" "$image_id" "$MODEL_REVISION" "$Q40_EXL3_SHA256" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if not path.is_file():
+    raise SystemExit(f"Q40 runtime attestation is missing: {path}")
+receipt = json.loads(path.read_text())
+expected = {
+    "schema": "sparkring-q40-exact-state-runtime-attestation/v1",
+    "status": "live-runtime-attested",
+    "scope": "target-mixed-exact-q40-only",
+    "dcp_rank": int(sys.argv[2]),
+    "image_id": sys.argv[3],
+    "checkpoint_revision": sys.argv[4],
+}
+for key, value in expected.items():
+    if receipt.get(key) != value:
+        raise SystemExit(f"Q40 receipt {key} mismatch: expected {value!r}, got {receipt.get(key)!r}")
+if receipt.get("sources", {}).get("exl3", {}).get("sha256") != sys.argv[5]:
+    raise SystemExit("Q40 receipt EXL3 hash mismatch")
+if set(receipt.get("gates", {}).values()) != {"pass"}:
+    raise SystemExit("one or more Q40 runtime gates did not pass")
+PY
+  fi
   if [[ "$rank" == "0" && "$VERIFY_CUDA_GRAPHS" == "1" ]]; then
     docker logs "$CONTAINER_NAME" 2>&1 \
       | grep -Eiq 'Capturing CUDA graph|CUDA graph capture|Graph capturing finished' || {

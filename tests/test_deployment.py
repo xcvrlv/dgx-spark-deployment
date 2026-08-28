@@ -156,7 +156,7 @@ class DeploymentStaticTests(unittest.TestCase):
         for ring_setting in (
             "NCCL_ALGO=Ring",
             "NCCL_SKIP_TREE_CONNECT",
-            "SPARKRING",
+            "VLLM_SPARK_TP4_MODE=custom",
             "PATCHED_NCCL_SO",
             "VLLM_NCCL_SO_PATH",
             "LD_PRELOAD",
@@ -297,7 +297,7 @@ def decode(logits):
         node = (ROOT / "scripts/glm52-exl3-node.sh").read_text()
         required = (
             "--tensor-parallel-size 4",
-            "--decode-context-parallel-size 1",
+            '--decode-context-parallel-size "$DECODE_CONTEXT_PARALLEL_SIZE"',
             "--distributed-executor-backend mp",
             "--nnodes 4",
             '--node-rank "$rank"',
@@ -342,6 +342,73 @@ def decode(logits):
         self.assertIn("scripts/glm52-exl3-node.sh", wrapper)
         self.assertIn("Dockerfile.glm52-exl3-sm121", wrapper)
         self.assertIn('exec "$root_dir/scripts/launch-glm53-flash.sh"', wrapper)
+
+    def test_sparkring_switch_recipe_matches_reference_serving_contract(self) -> None:
+        recipe = read_env(ROOT / "recipes/glm-5.2-exl3-sparkring-switch.env")
+        expected = {
+            "SPARKRING_UPSTREAM_COMMIT": "510556275ed3b77fc56a14367d319417072eeb8c",
+            "MODEL_CONFIG_SHA256": "fabb73eb513ec64f3a365da396b38de8d55b3930edfb11baeecbf34ecafa6126",
+            "MODEL_INDEX_SHA256": "9fd852f69ed64442e31dce1cbc5fe7acd0a76bfb848e945d272fe98d00d0c9cd",
+            "MODEL_SHARD_COUNT": "157",
+            "MODEL_INDEX_TOTAL_SIZE": "346218639128",
+            "DECODE_CONTEXT_PARALLEL_SIZE": "4",
+            "DCP_COMM_BACKEND": "ag_rs",
+            "DCP_KV_CACHE_INTERLEAVE_SIZE": "1",
+            "MTP_SPECULATIVE_TOKENS": "4",
+            "MTP_DRAFT_TP_SIZE": "4",
+            "MTP_MOE_BACKEND": "b12x",
+            "MAX_MODEL_LEN": "1048576",
+            "MAX_NUM_SEQS": "16",
+            "MAX_NUM_BATCHED_TOKENS": "4096",
+            "BLOCK_SIZE": "64",
+            "KV_CACHE_DTYPE": "nvfp4_ds_mla",
+            "KV_CACHE_MEMORY_BYTES": "9250000000",
+            "KV_FP8_ROPE": "1",
+            "VLLM_NVFP4_MLA_DYNAMIC_SCALE": "1",
+            "VLLM_USE_B12X_DCP_A2A": "1",
+            "VLLM_B12X_MLA_CKV_GATHER": "1",
+            "VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS": "1048576",
+            "VLLM_EXL3_PREFILL_CAPACITY": "4096",
+            "VLLM_SPARK_MAX_QUERY_ROWS": "40",
+            "MAX_CUDAGRAPH_CAPTURE_SIZE": "40",
+            "Q40_ENABLED": "1",
+            "NETWORK_TOPOLOGY": "switch-star-dual-rail",
+            "NCCL_CROSS_NIC": "1",
+        }
+        for key, value in expected.items():
+            self.assertEqual(recipe[key], value, key)
+        self.assertIn('"cudagraph_capture_sizes":[1,2,3,4,5', recipe["COMPILATION_CONFIG"])
+        self.assertIn('38,39,40]', recipe["COMPILATION_CONFIG"])
+        self.assertEqual(recipe["NCCL_ALGO"], "")
+        self.assertNotIn("NCCL_SKIP_TREE_CONNECT", recipe)
+
+    def test_sparkring_switch_launcher_uses_upstream_runtime_without_sircl(self) -> None:
+        builder = (ROOT / "scripts/build-glm52-sparkring-runtime.sh").read_text()
+        node = (ROOT / "scripts/glm52-exl3-node.sh").read_text()
+        wrapper = (ROOT / "scripts/launch-glm52-sparkring-switch.sh").read_text()
+        for fragment in (
+            "runtime/exl3-r7/build-image.sh",
+            "download_exl3_r7.py",
+            "prepare_q40_overlay_inputs.py",
+            "q40_exact_state_overlay.py",
+            "q40_exact_state_attestation_overlay.py",
+            "--image-id \"$image_id\"",
+        ):
+            self.assertIn(fragment, builder)
+        for fragment in (
+            '--dcp-comm-backend "$DCP_COMM_BACKEND"',
+            '--dcp-kv-cache-interleave-size "$DCP_KV_CACHE_INTERLEAVE_SIZE"',
+            '--block-size "$BLOCK_SIZE"',
+            '--kv-cache-memory-bytes "$KV_CACHE_MEMORY_BYTES"',
+            "VLLM_NVFP4_MLA_DYNAMIC_SCALE",
+            "VLLM_B12X_MLA_CKV_GATHER",
+            "SPARK_Q40_EXACT_STATE_ATTEST_PATH",
+            'NCCL_CROSS_NIC=$NCCL_CROSS_NIC',
+        ):
+            self.assertIn(fragment, node)
+        self.assertNotIn("VLLM_SPARK_TP4_MODE=custom", node)
+        self.assertNotIn("NCCL_SKIP_TREE_CONNECT", node)
+        self.assertIn("glm-5.2-exl3-sparkring-switch.env", wrapper)
 
 
 if __name__ == "__main__":
