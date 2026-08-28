@@ -178,8 +178,12 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertIn("moe_backend=speculative_config.moe_backend", patch)
         self.assertIn("ModelOpt MXFP8 MTP prefix alias", patch)
         self.assertIn('if ".mtp_block." in prefix', patch)
+        self.assertIn('"language_model.model." + suffix', patch)
         recipe = (ROOT / "recipes/glm-5.3-flash-nvfp4.env").read_text()
-        self.assertIn("IMAGE=spark-vllm-glm53:sm121-v4", recipe)
+        self.assertIn("IMAGE=spark-vllm-glm53:sm121-v5", recipe)
+        node = (ROOT / "scripts/glm53-node.sh").read_text()
+        self.assertIn('resolved=q._resolve_quant_algo(p)', node)
+        self.assertIn('assert resolved == "MXFP8"', node)
 
     def test_topk_guard_finds_the_call_instead_of_matching_branch_text(self) -> None:
         patch_source = (ROOT / "docker/patch_sm121.py").read_text()
@@ -240,6 +244,104 @@ def decode(logits):
             },
         )
         self.assertEqual(metrics["calculated_draft_acceptance_rate"], 0.6)
+
+    def test_full_glm52_exl3_recipe_pins_r34_tp4_contract(self) -> None:
+        recipe = read_env(ROOT / "recipes/glm-5.2-exl3-r7.env")
+        self.assertEqual(
+            recipe["MODEL_ID"],
+            "brandonmusic/GLM-5.2-EXL3-TR3v4-3.5bpw-MTP78",
+        )
+        self.assertEqual(
+            recipe["MODEL_REVISION"],
+            "9ab9579774cc432df91567a36f6e9e863e0d4c9f",
+        )
+        self.assertEqual(recipe["QUANTIZATION"], "exl3")
+        self.assertEqual(recipe["ATTENTION_BACKEND"], "B12X_MLA_SPARSE")
+        self.assertEqual(recipe["MOE_BACKEND"], "b12x")
+        self.assertEqual(recipe["ONLINE_QUANT"], "exl3-b6")
+        self.assertIn('"shared_experts"', recipe["ONLINE_QUANT_CONFIG"])
+        self.assertEqual(recipe["KV_CACHE_DTYPE"], "nvfp4_ds_mla")
+        self.assertEqual(recipe["LOAD_FORMAT"], "instanttensor")
+        self.assertEqual(recipe["INSTANTTENSOR_COPY"], "0")
+        self.assertEqual(recipe["B12X_PCIE_DMA"], "0")
+        self.assertEqual(recipe["DISABLE_CUSTOM_ALL_REDUCE"], "1")
+        self.assertEqual(recipe["MTP_SPECULATIVE_TOKENS"], "0")
+        self.assertEqual(recipe["ENFORCE_EAGER"], "1")
+        self.assertEqual(recipe["MAX_MODEL_LEN"], "65536")
+
+    def test_exl3_arm64_image_reconstructs_immutable_upstream_trees(self) -> None:
+        dockerfile = (ROOT / "docker/Dockerfile.glm52-exl3-sm121").read_text()
+        required = (
+            "glm53-flash-arm64-cu130@sha256:",
+            "7302862b8fcfdc7c06a411a61e1f0fb072258880",
+            "e2666d9a65f41fc376607531453cbd57c4c71016",
+            "b0f8c85c7b96497e0148a18230f43d18854ae04a",
+            "7cecbb2c4819636ae7f05f8b116f2c45ee2cff7b",
+            "cd3ce190f0f1917402cdfd5773724267cc9a63f8",
+            "704aefd743b390af4bd0fb429d1906f9b964c7d8",
+            "49b4010afc1cae0441e71fe0b0bffc24fa05e932",
+            "git -C /opt/vllm-r34 apply --index",
+            "git -C /opt/b12x-r34 apply --index",
+            "TORCH_CUDA_ARCH_LIST=12.1a",
+            "CUTE_DSL_ARCH=sm_121a",
+            "FLASHINFER_CUDA_ARCH_LIST=12.1f",
+            "python3 setup.py build_ext --inplace",
+            "VLLM_EXL3_EXT_PATH=/opt/exllamav3",
+            'local-inference.vllm.integration.tree="b0f8c85',
+            'local-inference.b12x.integration.tree="cd3ce19',
+        )
+        for fragment in required:
+            self.assertIn(fragment, dockerfile)
+
+    def test_exl3_node_uses_roce_tp4_without_single_host_pcie_collectives(self) -> None:
+        node = (ROOT / "scripts/glm52-exl3-node.sh").read_text()
+        required = (
+            "--tensor-parallel-size 4",
+            "--decode-context-parallel-size 1",
+            "--distributed-executor-backend mp",
+            "--nnodes 4",
+            '--node-rank "$rank"',
+            '--master-addr "$head_ip"',
+            "--attention-backend",
+            "--quantization-config",
+            "--disable-custom-all-reduce",
+            "VLLM_USE_B12X_PCIE_DMA=0",
+            "VLLM_ENABLE_PCIE_ALLREDUCE=0",
+            "B12X_PCIE_DMA_FP8=0",
+            "NCCL_NET=IB",
+            "CUTE_DSL_ARCH=sm_121a",
+            "VLLM_EXL3_ONLINE_CACHE_DIR=/cache/exl3-online",
+            "VLLM_EXL3_EXT_PATH=/opt/exllamav3",
+            'tail.get("format") != "exl3-trellis"',
+            'tail.get("tp") != 4',
+            '"local-inference.vllm.integration.tree"',
+            '"local-inference.b12x.integration.tree"',
+        )
+        for fragment in required:
+            self.assertIn(fragment, node)
+
+    def test_exl3_profiles_stage_graphs_before_mtp3(self) -> None:
+        graphs = read_env(ROOT / "profiles/glm52-exl3-cudagraph.env")
+        mtp_one = read_env(ROOT / "profiles/glm52-exl3-mtp-1.env")
+        mtp_three = read_env(ROOT / "profiles/glm52-exl3-mtp-3.env")
+        self.assertEqual(graphs["MTP_SPECULATIVE_TOKENS"], "0")
+        self.assertEqual(mtp_one["MTP_SPECULATIVE_TOKENS"], "1")
+        self.assertEqual(mtp_three["MTP_SPECULATIVE_TOKENS"], "3")
+        for profile in (graphs, mtp_one, mtp_three):
+            self.assertEqual(profile["ENFORCE_EAGER"], "0")
+            self.assertEqual(profile["VERIFY_CUDA_GRAPHS"], "1")
+            self.assertIn('"cudagraph_mode":"FULL_AND_PIECEWISE"', profile["COMPILATION_CONFIG"])
+            self.assertIn('"fuse_allreduce_rms":false', profile["COMPILATION_CONFIG"])
+        for profile in (mtp_one, mtp_three):
+            self.assertEqual(profile["MTP_USE_LOCAL_ARGMAX_REDUCTION"], "1")
+            self.assertEqual(profile["ASYNC_SCHEDULING"], "0")
+
+    def test_exl3_wrapper_reuses_guarded_fleet_orchestration(self) -> None:
+        wrapper = (ROOT / "scripts/launch-glm52-exl3.sh").read_text()
+        self.assertIn("recipes/glm-5.2-exl3-r7.env", wrapper)
+        self.assertIn("scripts/glm52-exl3-node.sh", wrapper)
+        self.assertIn("Dockerfile.glm52-exl3-sm121", wrapper)
+        self.assertIn('exec "$root_dir/scripts/launch-glm53-flash.sh"', wrapper)
 
 
 if __name__ == "__main__":

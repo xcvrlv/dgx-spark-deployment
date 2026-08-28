@@ -1,0 +1,113 @@
+# syntax=docker/dockerfile:1.7
+# Experimental ARM64/SM121 port of local-inference-lab's qualified SM120 r34
+# GLM-5.2 EXL3 source composition. Build this image on a DGX Spark.
+FROM vllm/vllm-openai:glm53-flash-arm64-cu130@sha256:905c02933be6021301db2dc284e24e3727467aa3a0f63b41d609885778a07bce
+
+ARG BLACKWELL_DOCKER_COMMIT=7302862b8fcfdc7c06a411a61e1f0fb072258880
+ARG VLLM_BASE_COMMIT=e2666d9a65f41fc376607531453cbd57c4c71016
+ARG VLLM_INTEGRATION_TREE=b0f8c85c7b96497e0148a18230f43d18854ae04a
+ARG B12X_BASE_COMMIT=7cecbb2c4819636ae7f05f8b116f2c45ee2cff7b
+ARG B12X_INTEGRATION_TREE=cd3ce190f0f1917402cdfd5773724267cc9a63f8
+ARG EXLLAMAV3_COMMIT=704aefd743b390af4bd0fb429d1906f9b964c7d8
+ARG INSTANTTENSOR_COMMIT=49b4010afc1cae0441e71fe0b0bffc24fa05e932
+ARG MAX_JOBS=8
+
+ENV TORCH_CUDA_ARCH_LIST=12.1a \
+    CUTE_DSL_ARCH=sm_121a \
+    CMAKE_CUDA_ARCHITECTURES=121 \
+    FLASHINFER_CUDA_ARCH_LIST=12.1f \
+    MAX_JOBS=${MAX_JOBS} \
+    NVCC_THREADS=1 \
+    VLLM_TARGET_DEVICE=cuda \
+    VLLM_USE_PRECOMPILED=0 \
+    VLLM_EXL3_EXT_PATH=/opt/exllamav3 \
+    VLLM_EXL3_ENCODER_SOURCE=/opt/exllamav3-python/exllamav3 \
+    VLLM_EXL3_ENCODER_REVISION=704aefd743b390af4bd0fb429d1906f9b964c7d8
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential cmake git ninja-build pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Fetch the immutable release archive first. Its patches reconstruct the exact
+# r34 vLLM and B12X trees without consulting moving pull-request heads.
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/local-inference-lab/blackwell-llm-docker.git \
+      /opt/blackwell-llm-docker \
+    && git -C /opt/blackwell-llm-docker checkout "${BLACKWELL_DOCKER_COMMIT}"
+
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/local-inference-lab/vllm.git /opt/vllm-r34 \
+    && git -C /opt/vllm-r34 checkout "${VLLM_BASE_COMMIT}" \
+    && git -C /opt/vllm-r34 apply --index \
+      /opt/blackwell-llm-docker/patches/releases/gilded-gnosis-v20-r34/vllm/integration.patch \
+    && test "$(git -C /opt/vllm-r34 write-tree)" = "${VLLM_INTEGRATION_TREE}"
+
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/local-inference-lab/b12x.git /opt/b12x-r34 \
+    && git -C /opt/b12x-r34 checkout "${B12X_BASE_COMMIT}" \
+    && git -C /opt/b12x-r34 apply --index \
+      /opt/blackwell-llm-docker/patches/releases/gilded-gnosis-v20-r34/b12x/integration.patch \
+    && test "$(git -C /opt/b12x-r34 write-tree)" = "${B12X_INTEGRATION_TREE}"
+
+# ExLlamaV3 supplies both the native EXL3 runtime and the encoder used for the
+# one-time online K6 conversion. The extension honors TORCH_CUDA_ARCH_LIST.
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/brandonmmusic-max/exllamav3.git /opt/exllamav3-python \
+    && git -C /opt/exllamav3-python checkout "${EXLLAMAV3_COMMIT}"
+
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/voipmonitor/InstantTensor.git /opt/instanttensor-r34 \
+    && git -C /opt/instanttensor-r34 checkout "${INSTANTTENSOR_COMMIT}"
+
+RUN cd /opt/exllamav3-python \
+    && python3 setup.py build_ext --inplace \
+    && install -d /opt/exllamav3 \
+    && extension="$(find . -maxdepth 1 -type f -name 'exllamav3_ext*.so' -print -quit)" \
+    && test -n "${extension}" \
+    && install -m 0755 "${extension}" /opt/exllamav3/
+
+# Reuse the ARM64 base's CUDA-enabled PyTorch rather than resolving amd64-only
+# release wheels. Any source/CUDA incompatibility therefore fails at build time.
+RUN if [ -f /opt/vllm-r34/use_existing_torch.py ]; then \
+      python3 /opt/vllm-r34/use_existing_torch.py; \
+    fi \
+    && python3 -m pip uninstall -y vllm \
+    && python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
+      /opt/b12x-r34 \
+    && python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
+      /opt/instanttensor-r34 \
+    && python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
+      /opt/vllm-r34
+
+RUN python3 - <<'PY'
+import importlib
+import os
+import sys
+from pathlib import Path
+
+import b12x
+import instanttensor
+import torch
+import vllm
+
+sys.path.insert(0, os.environ["VLLM_EXL3_EXT_PATH"])
+ext = importlib.import_module("exllamav3_ext")
+for name in ("exl3_gemm", "exl3_moe_fused", "exl3_moe_fused_retile"):
+    assert hasattr(ext, name), name
+root = Path(vllm.__file__).parent
+assert (root / "model_executor/layers/quantization/exl3.py").is_file()
+assert (root / "v1/attention/backends/mla/b12x_mla_sparse.py").is_file()
+assert Path("/opt/exllamav3-python/exllamav3/modules/quant/exl3_lib/quantize.py").is_file()
+print("GLM-5.2 EXL3 r34 ARM64 source contracts present")
+PY
+
+LABEL org.opencontainers.image.title="GLM-5.2 EXL3 R7 SM121 vLLM" \
+      org.opencontainers.image.description="Experimental DGX Spark port of local-inference-lab r34" \
+      local-inference.blackwell-docker.commit="7302862b8fcfdc7c06a411a61e1f0fb072258880" \
+      local-inference.vllm.base.commit="e2666d9a65f41fc376607531453cbd57c4c71016" \
+      local-inference.vllm.integration.tree="b0f8c85c7b96497e0148a18230f43d18854ae04a" \
+      local-inference.b12x.base.commit="7cecbb2c4819636ae7f05f8b116f2c45ee2cff7b" \
+      local-inference.b12x.integration.tree="cd3ce190f0f1917402cdfd5773724267cc9a63f8" \
+      local-inference.exllamav3.commit="704aefd743b390af4bd0fb429d1906f9b964c7d8" \
+      local-inference.instanttensor.commit="49b4010afc1cae0441e71fe0b0bffc24fa05e932"

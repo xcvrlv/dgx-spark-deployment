@@ -5,7 +5,10 @@ root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 inventory_file="${INVENTORY_FILE:-$root_dir/sparks.env}"
 recipe_file="${RECIPE_FILE:-$root_dir/recipes/glm-5.3-flash-nvfp4.env}"
 profile_file="${PROFILE_FILE:-}"
-node_script="$root_dir/scripts/glm53-node.sh"
+node_script="${NODE_SCRIPT:-$root_dir/scripts/glm53-node.sh}"
+image_dockerfile="${IMAGE_DOCKERFILE:-Dockerfile.glm53-sm121}"
+deployment_slug="${DEPLOYMENT_SLUG:-glm53}"
+deployment_label="${DEPLOYMENT_LABEL:-GLM-5.3 Flash}"
 
 [[ -f "$inventory_file" ]] || { echo "inventory not found: $inventory_file" >&2; exit 2; }
 [[ -f "$recipe_file" ]] || { echo "recipe not found: $recipe_file" >&2; exit 2; }
@@ -143,11 +146,17 @@ remote_node() {
     "NCCL_IB_ADDR_RANGE=$NCCL_IB_ADDR_RANGE" "NCCL_DEBUG=$NCCL_DEBUG"
     "PULL_IMAGE=$PULL_IMAGE" "ALLOW_UNVERIFIED_MODEL=$ALLOW_UNVERIFIED_MODEL"
     "INSTANTTENSOR_BACKEND=$INSTANTTENSOR_BACKEND"
+    "INSTANTTENSOR_COPY=${INSTANTTENSOR_COPY:-1}"
     "INSTANTTENSOR_BUFFER_SIZE=$INSTANTTENSOR_BUFFER_SIZE"
     "INSTANTTENSOR_CONCURRENCY=$INSTANTTENSOR_CONCURRENCY"
     "INSTANTTENSOR_IO_DEPTH=$INSTANTTENSOR_IO_DEPTH"
     "INSTANTTENSOR_CHUNK_SIZE=$INSTANTTENSOR_CHUNK_SIZE"
     "INSTANTTENSOR_MAX_FREE_MEM_USAGE=$INSTANTTENSOR_MAX_FREE_MEM_USAGE"
+    "ATTENTION_BACKEND=${ATTENTION_BACKEND:-}"
+    "ONLINE_QUANT=${ONLINE_QUANT:-none}"
+    "ONLINE_QUANT_CONFIG=${ONLINE_QUANT_CONFIG:-}"
+    "VLLM_EXL3_PREFILL_CAPACITY=${VLLM_EXL3_PREFILL_CAPACITY:-}"
+    "B12X_PCIE_DMA=${B12X_PCIE_DMA:-0}"
     "VERIFY_LOG_WINDOW=${VERIFY_LOG_WINDOW:-30m}"
     "LOG_TAIL_LINES=${LOG_TAIL_LINES:-200}"
   )
@@ -164,7 +173,7 @@ prepare_image() {
   command -v tar >/dev/null
   local head_target build_command save_command rank worker_target
   head_target="$(target_for_rank 0)"
-  printf -v build_command 'docker build --pull=false -f Dockerfile.glm53-sm121 -t %q -' "$IMAGE"
+  printf -v build_command 'docker build --pull=false -f %q -t %q -' "$image_dockerfile" "$IMAGE"
   echo "Building $IMAGE on rank 0 from the pinned SM121 Dockerfile..."
   tar -C "$root_dir/docker" -cf - . | ssh "${ssh_options[@]}" "$head_target" "$build_command"
 
@@ -199,7 +208,7 @@ benchmark_head() {
   profile_name=baseline
   [[ -z "$profile_file" ]] || profile_name="$(basename "$profile_file")"
   mkdir -p "$root_dir/benchmarks/results"
-  output_file="$root_dir/benchmarks/results/$(date -u +%Y%m%dT%H%M%SZ)-glm53.json"
+  output_file="$root_dir/benchmarks/results/$(date -u +%Y%m%dT%H%M%SZ)-${deployment_slug}.json"
   python3 "$root_dir/scripts/benchmark-glm53.py" \
     --base-url "http://${head_management}:${API_PORT}/v1" \
     --model "$SERVED_MODEL_NAME" \
@@ -251,7 +260,7 @@ start_all() {
       bash "$root_dir/scripts/smoke-test-glm53.sh"
   fi
   run_all_parallel verify
-  echo "GLM-5.3 Flash is ready at http://${head_management}:${API_PORT}/v1"
+  echo "$deployment_label is ready at http://${head_management}:${API_PORT}/v1"
 }
 
 case "$action" in

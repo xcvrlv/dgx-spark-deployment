@@ -153,8 +153,42 @@ ARM64 Spark:
 
 ```bash
 docker build -f docker/Dockerfile.glm53-sm121 \
-  -t spark-vllm-glm53:sm121-v4 docker
+  -t spark-vllm-glm53:sm121-v5 docker
 ```
 
 See [`docs/sm121-compatibility.md`](docs/sm121-compatibility.md) for the patch
 inventory, upstream status, and the gates for enabling FP8 KV and MTP.
+
+## Full GLM-5.2 EXL3 TP4 bring-up
+
+The full-model path is now staged separately from GLM-5.3 Flash. It ports the
+current local-inference-lab r34 GLM-5.2 R7 source composition to ARM64/SM121,
+serves the pinned 3.5 bpw checkpoint across four single-GPU Sparks, and uses the
+same fleet lifecycle as the Flash recipe. The upstream images are amd64/SM120
+single-host artifacts, so this repository rebuilds their pinned vLLM, B12X,
+ExLlamaV3, and InstantTensor sources on a Spark and uses NCCL/RoCE instead of
+B12X's single-host PCIe collectives.
+
+```bash
+# Build the ARM64 image, distribute it, and download the TP4 checkpoint.
+bash scripts/launch-glm52-exl3.sh prepare
+
+# Validate the eager, target-only baseline first.
+bash scripts/launch-glm52-exl3.sh start
+bash scripts/launch-glm52-exl3.sh benchmark
+
+# Then stage graphs, MTP1, and finally the upstream-proven MTP3 depth.
+PROFILE_FILE=profiles/glm52-exl3-cudagraph.env \
+  bash scripts/launch-glm52-exl3.sh start
+PROFILE_FILE=profiles/glm52-exl3-mtp-1.env \
+  bash scripts/launch-glm52-exl3.sh start
+PROFILE_FILE=profiles/glm52-exl3-mtp-3.env \
+  bash scripts/launch-glm52-exl3.sh start
+```
+
+The first start performs persistent online K6 encoding and can take well over
+15 minutes; keep `/var/tmp/glm52-exl3-cache` on every rank. GLM-5.3 full is not
+treated as a checkpoint swap: its release and EXL3 tensor contract must be
+verified before changing this recipe. See
+[`docs/glm52-exl3-sm121.md`](docs/glm52-exl3-sm121.md) for provenance,
+limitations, and the promotion gates.

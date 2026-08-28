@@ -131,9 +131,12 @@ replace_once(
         if ".mtp_block." in prefix:
             checkpoint_prefix = prefix.replace(".mtp_block.", ".", 1)
             if checkpoint_prefix.startswith("model."):
-                candidates.append(
-                    "model.language_model."
-                    + checkpoint_prefix[len("model.") :]
+                suffix = checkpoint_prefix[len("model.") :]
+                candidates.extend(
+                    (
+                        "model.language_model." + suffix,
+                        "language_model.model." + suffix,
+                    )
                 )
 
         return tuple(dict.fromkeys(candidates))
