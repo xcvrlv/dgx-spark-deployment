@@ -75,8 +75,7 @@ flashinfer = package_root("flashinfer")
 
 # The pinned vLLM commit exposes speculative_config.moe_backend but does not
 # apply it while constructing an EAGLE/MTP draft. Replace only the local
-# VllmConfig so the quantized target keeps Marlin and the unquantized draft can
-# select Triton.
+# VllmConfig so the target and draft may select their appropriate backends.
 replace_once(
     vllm / "v1/worker/gpu/spec_decode/eagle/utils.py",
     """    if speculative_config.kv_cache_dtype is not None:
@@ -108,6 +107,38 @@ replace_once(
     with set_model_tag("eagle_head"):
 """,
     "MTP draft MoE backend propagation",
+)
+
+# The mixed checkpoint records the MXFP8 MTP experts under the original
+# conditional-model path, while the draft runner inserts an `mtp_block` module
+# and omits `language_model`. Teach the resolver that these are the same layer;
+# otherwise it builds unquantized parameters and cannot load the FP8 scales.
+replace_once(
+    vllm / "model_executor/layers/quantization/modelopt.py",
+    """        elif prefix.startswith("model.language_model."):
+            candidates.append(
+                "language_model.model." + prefix[len("model.language_model.") :]
+            )
+
+        return tuple(dict.fromkeys(candidates))
+""",
+    """        elif prefix.startswith("model.language_model."):
+            candidates.append(
+                "language_model.model." + prefix[len("model.language_model.") :]
+            )
+
+        # ModelOpt MXFP8 MTP checkpoints use the pre-draft module path.
+        if ".mtp_block." in prefix:
+            checkpoint_prefix = prefix.replace(".mtp_block.", ".", 1)
+            if checkpoint_prefix.startswith("model."):
+                candidates.append(
+                    "model.language_model."
+                    + checkpoint_prefix[len("model.") :]
+                )
+
+        return tuple(dict.fromkeys(candidates))
+""",
+    "ModelOpt MXFP8 MTP prefix alias",
 )
 
 # Make the NoPE FlashInfer MLA path available on SM121. GLM has pe_dim=0, so

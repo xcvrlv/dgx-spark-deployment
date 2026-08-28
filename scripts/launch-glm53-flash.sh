@@ -61,9 +61,9 @@ if [[ "$MTP_USE_LOCAL_ARGMAX_REDUCTION" == "1" && "$MTP_DRAFT_SAMPLE_METHOD" != 
 fi
 if (( MTP_SPECULATIVE_TOKENS > 0 )); then
   case "$MTP_MOE_BACKEND" in
-    triton|batched_triton|flashinfer_trtllm|flashinfer_cutlass|aiter) ;;
+    marlin|triton|batched_triton|flashinfer_trtllm|flashinfer_cutlass|aiter) ;;
     *)
-      echo "MTP_MOE_BACKEND=$MTP_MOE_BACKEND is not valid for the unquantized MTP model" >&2
+      echo "unsupported MTP_MOE_BACKEND=$MTP_MOE_BACKEND" >&2
       exit 2
       ;;
   esac

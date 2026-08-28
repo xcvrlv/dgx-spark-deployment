@@ -65,7 +65,7 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertEqual(recipe["ENFORCE_EAGER"], "1")
         self.assertEqual(recipe["VERIFY_CUDA_GRAPHS"], "0")
         self.assertEqual(recipe["MTP_DRAFT_SAMPLE_METHOD"], "greedy")
-        self.assertEqual(recipe["MTP_MOE_BACKEND"], "triton")
+        self.assertEqual(recipe["MTP_MOE_BACKEND"], "marlin")
 
     def test_performance_profiles_stage_graphs_before_mtp(self) -> None:
         graphs = read_env(ROOT / "profiles/glm53-cudagraph.env")
@@ -82,7 +82,7 @@ class DeploymentStaticTests(unittest.TestCase):
         for profile in (mtp_one, mtp_three):
             self.assertEqual(profile["ASYNC_SCHEDULING"], "1")
             self.assertEqual(profile["MTP_DRAFT_TP_SIZE"], "4")
-            self.assertEqual(profile["MTP_MOE_BACKEND"], "triton")
+            self.assertEqual(profile["MTP_MOE_BACKEND"], "marlin")
             self.assertEqual(profile["MTP_USE_LOCAL_ARGMAX_REDUCTION"], "1")
             self.assertEqual(profile["MTP_DRAFT_SAMPLE_METHOD"], "greedy")
 
@@ -176,8 +176,10 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertIn("def guard_persistent_topk", patch)
         self.assertIn("MTP draft MoE backend propagation", patch)
         self.assertIn("moe_backend=speculative_config.moe_backend", patch)
+        self.assertIn("ModelOpt MXFP8 MTP prefix alias", patch)
+        self.assertIn('if ".mtp_block." in prefix', patch)
         recipe = (ROOT / "recipes/glm-5.3-flash-nvfp4.env").read_text()
-        self.assertIn("IMAGE=spark-vllm-glm53:sm121-v3", recipe)
+        self.assertIn("IMAGE=spark-vllm-glm53:sm121-v4", recipe)
 
     def test_topk_guard_finds_the_call_instead_of_matching_branch_text(self) -> None:
         patch_source = (ROOT / "docker/patch_sm121.py").read_text()

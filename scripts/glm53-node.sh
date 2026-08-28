@@ -146,6 +146,10 @@ PY
     'from pathlib import Path; p=Path("/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu/spec_decode/eagle/utils.py"); s=p.read_text(); assert "moe_backend=speculative_config.moe_backend" in s, "MTP draft MoE backend propagation patch is missing"' \
     >/dev/null
 
+  docker run --rm --entrypoint python3 "$IMAGE" -c \
+    'from pathlib import Path; p=Path("/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/modelopt.py"); s=p.read_text(); assert "ModelOpt MXFP8 MTP" in s, "ModelOpt MXFP8 MTP prefix alias is missing"' \
+    >/dev/null
+
   docker run --rm --entrypoint sh \
     -v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro" \
     "$IMAGE" -c 'test -f "$1/config.json" && test -f "$1/model.safetensors.index.json"' \
