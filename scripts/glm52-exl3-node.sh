@@ -12,6 +12,7 @@ required_env=(
   MODEL_PROVISIONING
   MODEL_CONFIG_SHA256 MODEL_INDEX_SHA256 MODEL_SHARD_COUNT MODEL_INDEX_TOTAL_SIZE
   RUNTIME_CONTRACT SPARKRING_UPSTREAM_COMMIT Q40_ENABLED Q40_HOST_PATH Q40_EXL3_SHA256
+  Q40_CHECKPOINT_REVISION
   SERVED_MODEL_NAME API_PORT MASTER_PORT MAX_MODEL_LEN MAX_NUM_SEQS
   MAX_NUM_BATCHED_TOKENS GPU_MEMORY_UTILIZATION QUANTIZATION ATTENTION_BACKEND
   LINEAR_BACKEND MOE_BACKEND LOAD_FORMAT ONLINE_QUANT ONLINE_QUANT_CONFIG
@@ -27,7 +28,7 @@ required_env=(
   ENABLE_CHUNKED_PREFILL ENABLE_PREFIX_CACHING ASYNC_SCHEDULING
   DISABLE_CUSTOM_ALL_REDUCE COMPILATION_CONFIG VERIFY_CUDA_GRAPHS ENFORCE_EAGER
   CONTAINER_MEMORY CONTAINER_SHM_SIZE CONTAINER_NOFILE NCCL_IB_GID_INDEX
-  NCCL_IB_ADDR_RANGE NCCL_DEBUG NETWORK_TOPOLOGY NCCL_CROSS_NIC
+  NCCL_IB_ADDR_RANGE NCCL_DEBUG NETWORK_TOPOLOGY FABRIC_IPS NCCL_CROSS_NIC
   NCCL_IB_MERGE_NICS NCCL_IB_SUBNET_AWARE_ROUTING NCCL_MIN_NCHANNELS
   NCCL_MAX_NCHANNELS NCCL_ALGO PULL_IMAGE ALLOW_UNVERIFIED_MODEL
   INSTANTTENSOR_BACKEND INSTANTTENSOR_COPY INSTANTTENSOR_BUFFER_SIZE
@@ -84,23 +85,23 @@ resolve_model_paths() {
   effective_model_container_path="$MODEL_MOUNT_CONTAINER_PATH/snapshots/$revision"
 }
 
+interface_for_ip() {
+  local wanted_ip="$1" iface
+  iface="$(ip -o -4 addr show | awk -v wanted="$wanted_ip" '$4 ~ ("^" wanted "/") { print $2; exit }')"
+  [[ -n "$iface" ]] || { echo "no Linux interface owns fabric address $wanted_ip" >&2; return 1; }
+  printf '%s\n' "$iface"
+}
+
 resolve_fabric_iface() {
   if [[ -n "${FABRIC_IFACE:-}" ]]; then
     printf '%s\n' "$FABRIC_IFACE"
     return
   fi
-  local iface
-  iface="$(ip -o -4 addr show | awk -v wanted="$host_ip" '$4 ~ ("^" wanted "/") { print $2; exit }')"
-  [[ -n "$iface" ]] || { echo "no Linux interface owns fabric address $host_ip" >&2; return 1; }
-  printf '%s\n' "$iface"
+  interface_for_ip "$host_ip"
 }
 
-resolve_hca() {
+resolve_hca_for_iface() {
   local iface="$1"
-  if [[ -n "${NCCL_IB_HCA:-}" ]]; then
-    printf '%s\n' "$NCCL_IB_HCA"
-    return
-  fi
   local hca=""
   if command -v ibdev2netdev >/dev/null 2>&1; then
     hca="$(ibdev2netdev | awk -v wanted="$iface" '$NF == wanted || $(NF-1) == wanted { print $1; exit }')"
@@ -112,6 +113,39 @@ resolve_hca() {
   printf '%s\n' "$hca"
 }
 
+resolve_hca() {
+  local primary_iface="$1"
+  if [[ -n "${NCCL_IB_HCA:-}" ]]; then
+    printf '%s\n' "$NCCL_IB_HCA"
+    return
+  fi
+
+  local -a fabric_ips=() resolved_hcas=()
+  local fabric_ip iface hca existing
+  if [[ "$NETWORK_TOPOLOGY" == "switch-star-dual-rail" ]]; then
+    IFS=',' read -r -a fabric_ips <<<"$FABRIC_IPS"
+  else
+    fabric_ips=("$host_ip")
+  fi
+  for fabric_ip in "${fabric_ips[@]}"; do
+    iface="$(interface_for_ip "$fabric_ip")"
+    hca="$(resolve_hca_for_iface "$iface")"
+    existing=0
+    local known_hca
+    for known_hca in "${resolved_hcas[@]}"; do
+      [[ "$known_hca" == "$hca" ]] && existing=1
+    done
+    (( existing == 1 )) || resolved_hcas+=("$hca")
+  done
+  if [[ "$NETWORK_TOPOLOGY" == "switch-star-dual-rail" && "${#resolved_hcas[@]}" -ne 2 ]]; then
+    echo "dual-rail discovery expected two distinct RDMA HCAs, found: ${resolved_hcas[*]}" >&2
+    return 1
+  fi
+  local joined
+  joined="$(IFS=,; echo "${resolved_hcas[*]}")"
+  printf '%s\n' "$joined"
+}
+
 validate_hcas() {
   local hca_list="$1" raw_hca hca
   local -a configured_hcas=()
@@ -120,6 +154,24 @@ validate_hcas() {
     hca="${raw_hca%%:*}"
     [[ -d "/sys/class/infiniband/$hca" ]] || {
       echo "configured RDMA HCA is absent: $hca" >&2
+      return 1
+    }
+  done
+}
+
+validate_fabric_mtus() {
+  local -a fabric_ips=()
+  local fabric_ip iface iface_mtu
+  if [[ "$NETWORK_TOPOLOGY" == "switch-star-dual-rail" ]]; then
+    IFS=',' read -r -a fabric_ips <<<"$FABRIC_IPS"
+  else
+    fabric_ips=("$host_ip")
+  fi
+  for fabric_ip in "${fabric_ips[@]}"; do
+    iface="$(interface_for_ip "$fabric_ip")"
+    iface_mtu="$(<"/sys/class/net/$iface/mtu")"
+    (( iface_mtu >= 9000 )) || {
+      echo "fabric interface $iface ($fabric_ip) has MTU $iface_mtu; switched profile requires at least 9000" >&2
       return 1
     }
   done
@@ -221,12 +273,7 @@ PY
   iface="$(resolve_fabric_iface)"
   hca="$(resolve_hca "$iface")"
   validate_hcas "$hca"
-  local iface_mtu
-  iface_mtu="$(<"/sys/class/net/$iface/mtu")"
-  (( iface_mtu >= 9000 )) || {
-    echo "fabric interface $iface has MTU $iface_mtu; switched profile requires at least 9000" >&2
-    return 1
-  }
+  validate_fabric_mtus
   if [[ "$MODEL_PROVISIONING" == "local" ]]; then
     : # The operator owns local model identity and lifecycle.
   elif [[ -f "$MODEL_HOST_PATH/.spark-deployment-revision" ]]; then
@@ -270,7 +317,7 @@ PY
     test -f "$Q40_HOST_PATH/exl3.py"
     test -f "$Q40_HOST_PATH/model_runner.py"
     test -f "$Q40_HOST_PATH/manifest.json"
-    python3 - "$Q40_HOST_PATH" "$image_id" "$MODEL_REVISION" "$Q40_EXL3_SHA256" <<'PY'
+    python3 - "$Q40_HOST_PATH" "$image_id" "$Q40_CHECKPOINT_REVISION" "$Q40_EXL3_SHA256" <<'PY'
 import hashlib
 import json
 import sys
@@ -366,7 +413,7 @@ start_node() {
       -e "SPARK_Q40_EXACT_STATE_ATTEST_PATH=/cache/jit/q40-exact-state-serving-v1-rank${rank}.json"
       -e "SPARK_Q40_EXACT_STATE_EXPECTED_EXL3_SHA256=$Q40_EXL3_SHA256"
       -e "SPARK_Q40_EXACT_STATE_IMAGE_ID=$(docker image inspect "$IMAGE" --format '{{.Id}}')"
-      -e "SPARK_Q40_EXACT_STATE_CHECKPOINT=$MODEL_REVISION"
+      -e "SPARK_Q40_EXACT_STATE_CHECKPOINT=$Q40_CHECKPOINT_REVISION"
       -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
       -e VLLM_NCCL_SO_PATH=/opt/sparkring/nccl/libnccl.so.2
     )
@@ -534,7 +581,7 @@ verify_node() {
     local receipt_path image_id
     receipt_path="$CACHE_HOST_PATH/jit/q40-exact-state-serving-v1-rank${rank}.json"
     image_id="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
-    python3 - "$receipt_path" "$rank" "$image_id" "$MODEL_REVISION" "$Q40_EXL3_SHA256" <<'PY'
+    python3 - "$receipt_path" "$rank" "$image_id" "$Q40_CHECKPOINT_REVISION" "$Q40_EXL3_SHA256" <<'PY'
 import json
 import sys
 from pathlib import Path

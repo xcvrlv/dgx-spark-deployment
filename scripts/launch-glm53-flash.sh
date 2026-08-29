@@ -43,6 +43,7 @@ RUNTIME_CONTRACT="${RUNTIME_CONTRACT:-local-inference}"
 Q40_ENABLED="${Q40_ENABLED:-0}"
 Q40_HOST_PATH="${Q40_HOST_PATH:-}"
 Q40_EXL3_SHA256="${Q40_EXL3_SHA256:-}"
+Q40_CHECKPOINT_REVISION="${Q40_CHECKPOINT_REVISION:-$MODEL_REVISION}"
 MODEL_CONFIG_SHA256="${MODEL_CONFIG_SHA256:-}"
 MODEL_INDEX_SHA256="${MODEL_INDEX_SHA256:-}"
 MODEL_SHARD_COUNT="${MODEL_SHARD_COUNT:-}"
@@ -88,6 +89,10 @@ for boolean_name in ENFORCE_EAGER VERIFY_CUDA_GRAPHS MTP_USE_LOCAL_ARGMAX_REDUCT
     exit 2
   }
 done
+if [[ "$Q40_ENABLED" == "1" && ! "$Q40_CHECKPOINT_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Q40_CHECKPOINT_REVISION must be 40 lowercase hex characters" >&2
+  exit 2
+fi
 for boolean_name in NCCL_CROSS_NIC NCCL_IB_MERGE_NICS NCCL_IB_SUBNET_AWARE_ROUTING; do
   [[ "${!boolean_name}" =~ ^[01]$ ]] || {
     echo "$boolean_name must be 0 or 1" >&2
@@ -112,8 +117,8 @@ if (( MTP_SPECULATIVE_TOKENS > 0 )); then
   esac
 fi
 if [[ "$NETWORK_TOPOLOGY" == "switch-star-dual-rail" ]]; then
-  [[ "$NCCL_IB_HCA" == *,* ]] || {
-    echo "switch-star-dual-rail requires two comma-separated NCCL_IB_HCA devices" >&2
+  [[ -z "$NCCL_IB_HCA" || "$NCCL_IB_HCA" == *,* ]] || {
+    echo "set NCCL_IB_HCA to two comma-separated devices or leave it empty for per-node discovery" >&2
     exit 2
   }
   [[ "$NCCL_CROSS_NIC" == "1" ]] || {
@@ -183,9 +188,10 @@ remote_node() {
   local node_action="$1"
   local rank="$2"
   local node=$((rank + 1))
-  local management_ip fabric_ip head_ip target remote_command
+  local management_ip fabric_ip fabric_ips head_ip target remote_command
   management_ip="$(inventory_value "$node" MANAGEMENT_IP)"
   fabric_ip="$(inventory_value "$node" "${CLUSTER_RAIL}_IP")"
+  fabric_ips="$(inventory_value "$node" CX0_IP),$(inventory_value "$node" CX1_IP)"
   head_ip="$(inventory_value 1 "${CLUSTER_RAIL}_IP")"
   target="$(ssh_target "$management_ip")"
 
@@ -204,6 +210,7 @@ remote_node() {
     "RUNTIME_CONTRACT=$RUNTIME_CONTRACT" "Q40_ENABLED=$Q40_ENABLED"
     "SPARKRING_UPSTREAM_COMMIT=$SPARKRING_UPSTREAM_COMMIT"
     "Q40_HOST_PATH=$Q40_HOST_PATH" "Q40_EXL3_SHA256=$Q40_EXL3_SHA256"
+    "Q40_CHECKPOINT_REVISION=$Q40_CHECKPOINT_REVISION"
     "MAX_NUM_SEQS=$MAX_NUM_SEQS" "MAX_NUM_BATCHED_TOKENS=$MAX_NUM_BATCHED_TOKENS"
     "GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION" "BLOCK_SIZE=$BLOCK_SIZE"
     "QUANTIZATION=$QUANTIZATION" "LINEAR_BACKEND=$LINEAR_BACKEND"
@@ -235,7 +242,7 @@ remote_node() {
     "VLLM_SPARK_SHARED_CAPTURE_STREAM=$VLLM_SPARK_SHARED_CAPTURE_STREAM"
     "ENFORCE_EAGER=$ENFORCE_EAGER" "CONTAINER_MEMORY=$CONTAINER_MEMORY"
     "CONTAINER_SHM_SIZE=$CONTAINER_SHM_SIZE" "CONTAINER_NOFILE=$CONTAINER_NOFILE"
-    "FABRIC_IFACE=${FABRIC_IFACE:-}"
+    "FABRIC_IFACE=${FABRIC_IFACE:-}" "FABRIC_IPS=$fabric_ips"
     "NCCL_IB_HCA=${NCCL_IB_HCA:-}" "NCCL_IB_GID_INDEX=$NCCL_IB_GID_INDEX"
     "NCCL_IB_ADDR_RANGE=$NCCL_IB_ADDR_RANGE" "NCCL_DEBUG=$NCCL_DEBUG"
     "NETWORK_TOPOLOGY=$NETWORK_TOPOLOGY" "NCCL_CROSS_NIC=$NCCL_CROSS_NIC"
@@ -282,6 +289,7 @@ prepare_image() {
     }
     printf -v build_assignments '%q ' env \
       "IMAGE=$IMAGE" "MODEL_REVISION=$MODEL_REVISION" \
+      "Q40_CHECKPOINT_REVISION=$Q40_CHECKPOINT_REVISION" \
       "SPARKRING_UPSTREAM_COMMIT=${SPARKRING_UPSTREAM_COMMIT:-}" \
       "SPARKRING_BASE_IMAGE=${SPARKRING_BASE_IMAGE:-}" \
       "SPARKRING_BASE_IMAGE_LICENSES=${SPARKRING_BASE_IMAGE_LICENSES:-}" \

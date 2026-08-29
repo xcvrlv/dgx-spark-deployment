@@ -43,18 +43,18 @@ and patched NCCL fallback over a physical direct cable cycle. This port:
 
 - does not enable or mount the SIRCL TP4 backend;
 - uses patched NCCL over a non-blocking RoCE switch for all distributed paths;
-- uses CX0 for rendezvous and both `mlx5_0,mlx5_1` switch-facing HCAs for
-  collectives by default;
+- uses CX0 for rendezvous and discovers both switch-facing RDMA HCAs per node
+  from its CX0/CX1 inventory addresses;
 - enables cross-NIC routing and subnet-aware routing;
 - does not force `NCCL_ALGO=Ring`, fixed channel counts, or
   `NCCL_SKIP_TREE_CONNECT`, allowing NCCL to choose switch-appropriate
   algorithms.
 
 The two rails must both terminate on the intended lossless switch fabric, use
-MTU 9000, and have working RoCEv2/PFC/ECN configuration. If only one adapter is
-cabled, override `NCCL_IB_HCA` and `NCCL_CROSS_NIC=0` in the local environment
-file. HCA enumeration must be checked on every rank;
-the default names are not assumed to be universal.
+MTU 9000, and have working RoCEv2/PFC/ECN configuration. DGX Spark HCA names
+are not assumed to be `mlx5_*`: the launcher maps each inventory IP to its
+Linux netdev and then uses `ibdev2netdev` or sysfs to find its RDMA device. If
+only one adapter is cabled, use a single-rail topology instead of this profile.
 
 The switch may improve collective performance, but that is a hypothesis, not
 a property of the topology. Preserve the exact serving knobs and compare the
@@ -72,7 +72,7 @@ and mounts the whole repository so snapshot-to-blob symlinks remain valid.
 ```bash
 cp .env.example .env.sparkring-switch
 # Set SPARK_SSH_USER in that file.
-# Override NCCL_IB_HCA if the two adapters are not mlx5_0 and mlx5_1.
+# Normally leave NCCL_IB_HCA empty for automatic per-node discovery.
 
 # Offline local checks only. Nothing is downloaded.
 bash scripts/launch-glm52-sparkring-switch.sh prepare
@@ -85,7 +85,10 @@ If the runtime image is not present, explicitly run `build` first. That action
 checks out the pinned SparkRing source, pulls its immutable parent, builds the
 runtime and Q40 overlays on rank 0, and distributes them. Audit and set
 `SPARKRING_BASE_IMAGE_LICENSES` only if the immutable parent's own
-`org.opencontainers.image.licenses` label needs an audited override.
+`org.opencontainers.image.licenses` label needs an audited override. The pinned
+parent currently has no such label, so the private-fleet default is the honest
+SPDX placeholder `LicenseRef-Unknown-Operator-Supplied`. It is not a license
+grant; do not redistribute the derived image until the parent is audited.
 
 The repository's `benchmark` action is a functional deployment diagnostic. It
 is not the `llm_decode_bench.py` normalized harness used for SparkRing's
@@ -133,7 +136,10 @@ different model for:
 The exact-Q40 overlay remains image-bound and its runtime gates are enforced.
 If a model's layer geometry does not satisfy those gates, disable Q40 for an
 initial bring-up or rebuild/adjust the overlay instead of weakening its runtime
-attestation.
+attestation. Upstream requires the receipt's checkpoint field to be 40
+lowercase hexadecimal characters. The local-model profile therefore uses a
+stable synthetic `Q40_CHECKPOINT_REVISION`; it identifies the operator-managed
+model slot and is not presented as a model revision or content hash.
 
 ## Qualification gates
 

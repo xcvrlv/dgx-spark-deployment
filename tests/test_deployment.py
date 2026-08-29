@@ -350,6 +350,7 @@ def decode(logits):
             "MODEL_PROVISIONING": "local",
             "PREPARE_IMAGE": "0",
             "MODEL_ID": "davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw",
+            "Q40_CHECKPOINT_REVISION": "fa6cf0511c0c0d0477874ee2c8570652e1d63f66",
             "MODEL_HOST_PATH": "/home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw",
             "MODEL_CONTAINER_PATH": "auto",
             "ALLOW_UNVERIFIED_MODEL": "1",
@@ -382,6 +383,7 @@ def decode(logits):
         self.assertIn('"cudagraph_capture_sizes":[1,2,3,4,5', recipe["COMPILATION_CONFIG"])
         self.assertIn('38,39,40]', recipe["COMPILATION_CONFIG"])
         self.assertEqual(recipe["NCCL_ALGO"], "")
+        self.assertEqual(recipe["NCCL_IB_HCA"], "")
         self.assertEqual(recipe["MODEL_CONFIG_SHA256"], "")
         self.assertEqual(recipe["MODEL_INDEX_SHA256"], "")
         self.assertEqual(recipe["MODEL_SHARD_COUNT"], "")
@@ -399,12 +401,16 @@ def decode(logits):
             "q40_exact_state_overlay.py",
             "q40_exact_state_attestation_overlay.py",
             "--image-id \"$image_id\"",
+            '--checkpoint-revision "$q40_checkpoint_revision"',
         ):
             self.assertIn(fragment, builder)
         for fragment in (
             'if [[ "$MODEL_PROVISIONING" == "local" ]]',
             "local model ready at $effective_model_host_path (offline; no files downloaded)",
             'effective_model_container_path="$MODEL_MOUNT_CONTAINER_PATH/snapshots/$revision"',
+            'IFS=\',\' read -r -a fabric_ips <<<"$FABRIC_IPS"',
+            'hca="$(resolve_hca_for_iface "$iface")"',
+            "dual-rail discovery expected two distinct RDMA HCAs",
             '--dcp-comm-backend "$DCP_COMM_BACKEND"',
             '--dcp-kv-cache-interleave-size "$DCP_KV_CACHE_INTERLEAVE_SIZE"',
             '--block-size "$BLOCK_SIZE"',
@@ -412,6 +418,7 @@ def decode(logits):
             "VLLM_NVFP4_MLA_DYNAMIC_SCALE",
             "VLLM_B12X_MLA_CKV_GATHER",
             "SPARK_Q40_EXACT_STATE_ATTEST_PATH",
+            "SPARK_Q40_EXACT_STATE_CHECKPOINT=$Q40_CHECKPOINT_REVISION",
             'NCCL_CROSS_NIC=$NCCL_CROSS_NIC',
         ):
             self.assertIn(fragment, node)
@@ -419,6 +426,7 @@ def decode(logits):
         self.assertNotIn("NCCL_SKIP_TREE_CONNECT", node)
         self.assertNotIn("download_exl3_r7.py", builder)
         self.assertIn('if [[ "$PREPARE_IMAGE" == "1" ]]', launcher)
+        self.assertIn('"FABRIC_IFACE=${FABRIC_IFACE:-}" "FABRIC_IPS=$fabric_ips"', launcher)
         self.assertIn("PREPARE_IMAGE=0: using the existing runtime image and local model files", launcher)
         self.assertIn("glm-5.2-exl3-sparkring-switch.env", wrapper)
 

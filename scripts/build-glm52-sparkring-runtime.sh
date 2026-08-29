@@ -8,7 +8,7 @@ base_image="${SPARKRING_BASE_IMAGE:?SPARKRING_BASE_IMAGE is required}"
 base_licenses="${SPARKRING_BASE_IMAGE_LICENSES:-}"
 build_root="${SPARKRING_BUILD_ROOT:-/var/tmp/sparkring-r7-build}"
 q40_root="${Q40_HOST_PATH:-/var/tmp/sparkring-q40-exact-state-v1}"
-model_revision="${MODEL_REVISION:?MODEL_REVISION is required}"
+q40_checkpoint_revision="${Q40_CHECKPOINT_REVISION:-${MODEL_REVISION:?MODEL_REVISION is required}}"
 repository=https://github.com/FujitsuPolycom/sparkring.git
 
 source_root="$build_root/source"
@@ -30,11 +30,12 @@ if [[ -z "$base_licenses" ]]; then
   base_licenses="$(docker image inspect "$base_image" \
     --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')"
   if [[ -z "$base_licenses" || "$base_licenses" == "<no value>" ]]; then
-    echo "The immutable parent has no org.opencontainers.image.licenses label." >&2
-    echo "Audit that parent and set SPARKRING_BASE_IMAGE_LICENSES to its SPDX expression." >&2
-    exit 2
+    base_licenses="LicenseRef-Unknown-Operator-Supplied"
+    echo "WARNING: the immutable parent has no OCI license label; recording $base_licenses." >&2
+    echo "WARNING: do not redistribute the derived image without auditing the parent." >&2
+  else
+    echo "Using parent OCI license expression: $base_licenses"
   fi
-  echo "Using parent OCI license expression: $base_licenses"
 fi
 
 if [[ -d "$prepared_root" ]]; then
@@ -49,7 +50,7 @@ BASE_IMAGE_ID="$base_image_id" \
 BASE_IMAGE_LICENSES="$base_licenses" \
 PREPARED_SOURCES="$prepared_root" \
 IMAGE="$image" \
-  "$source_root/runtime/exl3-r7/build-image.sh"
+  bash "$source_root/runtime/exl3-r7/build-image.sh"
 
 image_id="$(docker image inspect "$image" --format '{{.Id}}')"
 overlay_work="$(mktemp -d "$build_root/q40-work.XXXXXX")"
@@ -71,9 +72,9 @@ python3 "$source_root/scripts/glm35_q40/q40_exact_state_attestation_overlay.py" 
   --source "$overlay_work/vllm/vllm/v1/worker/gpu/model_runner.py" \
   --output "$q40_root/model_runner.py" \
   --image-id "$image_id" \
-  --checkpoint-revision "$model_revision"
+  --checkpoint-revision "$q40_checkpoint_revision"
 
-python3 - "$q40_root" "$image_id" "$model_revision" "$revision" <<'PY'
+python3 - "$q40_root" "$image_id" "$q40_checkpoint_revision" "$revision" <<'PY'
 import hashlib
 import json
 import sys
