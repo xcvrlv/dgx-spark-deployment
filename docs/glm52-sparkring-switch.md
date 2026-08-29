@@ -94,19 +94,13 @@ health figure is `MemAvailable`. The explicit preflight reports both and uses
 each node immediately before vLLM starts. It uses a short-lived privileged
 container from the already-pinned local runtime image, with direct-root and
 passwordless-`sudo` fallbacks. Set it to `0` only if cache reclaim is handled
-externally. The pinned vLLM worker still gates startup on CUDA `MemFree` after
-NCCL initialization. `VLLM_UMA_USE_MEM_AVAILABLE=1` therefore generates an
-image-bound, fail-closed overlay of that one worker module and uses Linux
-`MemAvailable` for the admission comparison. The server logs both figures.
-The overlay does not bypass the 0.85 threshold: it changes only which UMA
-availability figure is compared with it, and refuses to launch if the pinned
-source shape has drifted.
+externally. No vLLM source file is generated or bind-mounted by the launcher.
 
-The switched GB10 profile deliberately leaves `CONTAINER_MEMORY` empty. A
-Docker memory limit is not a separate CPU-only guard on this platform: Python
-RSS, NCCL buffers, page cache, model weights, and KV allocations share the UMA
-pool and are all charged to the container cgroup. The previous `112g` ceiling
-left almost no room above vLLM's 0.85 request and could cause a later cgroup OOM.
+The switched GB10 profile uses a `116g` container ceiling. Python RSS, NCCL
+buffers, model weights, and KV allocations share the UMA pool. This ceiling
+allows more process overhead than the former `112g` value while retaining
+roughly 5 GiB of host headroom, so a late model-load OOM kills the serving
+container rather than destabilizing SSH and the whole node.
 
 The pinned vLLM CLI normally selects `spawn`, which imports the heavy runtime
 independently in the API server, engine core, and worker. This profile selects
