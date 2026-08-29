@@ -183,7 +183,6 @@ PY
 }
 
 start_node() {
-  preflight_node
   capture_logs
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   mkdir -p "$CACHE_HOST_PATH" "$LOG_HOST_PATH"

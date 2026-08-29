@@ -81,6 +81,13 @@ bash scripts/launch-glm52-sparkring-switch.sh start
 bash scripts/launch-glm52-sparkring-switch.sh benchmark
 ```
 
+`start` does not run preflight implicitly. Run the explicit `preflight` action
+when configuration or hardware state has changed; repeated starts go directly
+to teardown and worker-first launch. The default GPU utilization remains 0.85;
+each node must expose at least about 104 GiB free before launch. A lower reading
+is a node-health or competing-workload condition and is not masked by reducing
+the serving envelope.
+
 If the runtime image is not present, explicitly run `build` first. That action
 checks out the pinned SparkRing source, pulls its immutable parent, builds the
 runtime and Q40 overlays on rank 0, and distributes them. Audit and set
@@ -147,6 +154,8 @@ model slot and is not presented as a model revision or content hash.
   passes on all four ranks with the image's CUDA forward-compatibility driver
   library preloaded;
 - config/index readability and every referenced local shard pass on all ranks;
+- the GPU memory health probe reports at least the 0.85 envelope (about 104 GiB)
+  free on every rank, with no competing GPU workload;
 - both switch rails pass RoCE validation without retries, fallback to sockets,
   or asymmetric HCA selection;
 - all four exact-Q40 attestations are fresh and consistent;

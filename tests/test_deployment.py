@@ -97,6 +97,8 @@ class DeploymentStaticTests(unittest.TestCase):
         self.assertIn('this recipe requires TP_NODE_COUNT=4', launcher)
         self.assertIn('MODEL_MOUNT_HOST_PATH="${MODEL_MOUNT_HOST_PATH:-$MODEL_HOST_PATH}"', launcher)
         self.assertIn('MODEL_MOUNT_CONTAINER_PATH="${MODEL_MOUNT_CONTAINER_PATH:-$MODEL_CONTAINER_PATH}"', launcher)
+        start_all = launcher[launcher.index("start_all() {"):launcher.index("case \"$action\" in")]
+        self.assertNotIn("run_all_parallel preflight", start_all)
         for action in (
             "build",
             "prepare",
@@ -136,6 +138,8 @@ class DeploymentStaticTests(unittest.TestCase):
         )
         for fragment in required:
             self.assertIn(fragment, node)
+        start_node = node[node.index("start_node() {"):node.index("verify_node() {")]
+        self.assertNotIn("preflight_node", start_node)
         self.assertIn('-v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro"', node)
         self.assertIn('model is not readable in the container at $MODEL_CONTAINER_PATH', node)
         self.assertIn(
@@ -361,6 +365,7 @@ def decode(logits):
             "MTP_DRAFT_TP_SIZE": "4",
             "MTP_MOE_BACKEND": "b12x",
             "MAX_MODEL_LEN": "1048576",
+            "GPU_MEMORY_UTILIZATION": "0.85",
             "MAX_NUM_SEQS": "16",
             "MAX_NUM_BATCHED_TOKENS": "4096",
             "BLOCK_SIZE": "64",
@@ -421,10 +426,14 @@ def decode(logits):
             "SPARK_Q40_EXACT_STATE_CHECKPOINT=$Q40_CHECKPOINT_REVISION",
             'cuda_compat_env=(\n      -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1',
             'docker run --rm --gpus all "${cuda_compat_env[@]}" "$IMAGE" /bin/true',
+            'GPU memory health: free={free_bytes / gib:.2f} GiB',
+            'required_bytes = total_bytes * utilization',
             'NCCL_CROSS_NIC=$NCCL_CROSS_NIC',
         ):
             self.assertIn(fragment, node)
         self.assertNotIn("VLLM_SPARK_TP4_MODE=custom", node)
+        start_node = node[node.index("start_node() {"):node.index("verify_node() {")]
+        self.assertNotIn("preflight_node", start_node)
         self.assertNotIn("NCCL_SKIP_TREE_CONNECT", node)
         self.assertNotIn("download_exl3_r7.py", builder)
         self.assertIn('if [[ "$PREPARE_IMAGE" == "1" ]]', launcher)

@@ -320,6 +320,26 @@ PY
     *) echo "unsupported RUNTIME_CONTRACT=$RUNTIME_CONTRACT" >&2; return 1 ;;
   esac
 
+  docker run --rm --gpus all --entrypoint python3 \
+    "${cuda_compat_env[@]}" -e "GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION" \
+    "$IMAGE" -c '
+import os
+import torch
+
+free_bytes, total_bytes = torch.cuda.mem_get_info()
+utilization = float(os.environ["GPU_MEMORY_UTILIZATION"])
+required_bytes = total_bytes * utilization
+gib = 1024 ** 3
+print(
+    f"GPU memory health: free={free_bytes / gib:.2f} GiB "
+    f"total={total_bytes / gib:.2f} GiB required={required_bytes / gib:.2f} GiB"
+)
+if free_bytes < required_bytes:
+    raise SystemExit(
+        "GPU memory health failed: stop competing GPU workloads or repair/reboot the node"
+    )
+'
+
   if [[ "$Q40_ENABLED" == "1" ]]; then
     test -f "$Q40_HOST_PATH/exl3.py"
     test -f "$Q40_HOST_PATH/model_runner.py"
@@ -392,7 +412,7 @@ PY
 }
 
 start_node() {
-  preflight_node
+  resolve_model_paths
   capture_logs
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   mkdir -p "$CACHE_HOST_PATH" "$LOG_HOST_PATH"

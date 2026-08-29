@@ -379,8 +379,6 @@ benchmark_head() {
 }
 
 start_all() {
-  echo "Preflighting all four Sparks..."
-  run_all_parallel preflight
   echo "Stopping every old rank before rendezvous..."
   stop_all
 
