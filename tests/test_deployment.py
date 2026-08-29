@@ -341,7 +341,7 @@ def decode(logits):
         self.assertIn("recipes/glm-5.2-exl3-r7.env", wrapper)
         self.assertIn("scripts/glm52-exl3-node.sh", wrapper)
         self.assertIn("Dockerfile.glm52-exl3-sm121", wrapper)
-        self.assertIn('exec "$root_dir/scripts/launch-glm53-flash.sh"', wrapper)
+        self.assertIn('exec bash "$root_dir/scripts/launch-glm53-flash.sh"', wrapper)
 
     def test_sparkring_switch_recipe_matches_reference_serving_contract(self) -> None:
         recipe = read_env(ROOT / "recipes/glm-5.2-exl3-sparkring-switch.env")

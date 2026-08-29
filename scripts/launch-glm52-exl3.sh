@@ -9,4 +9,4 @@ export IMAGE_DOCKERFILE="${IMAGE_DOCKERFILE:-Dockerfile.glm52-exl3-sm121}"
 export DEPLOYMENT_SLUG="${DEPLOYMENT_SLUG:-glm52-exl3}"
 export DEPLOYMENT_LABEL="${DEPLOYMENT_LABEL:-GLM-5.2 EXL3 R7}"
 
-exec "$root_dir/scripts/launch-glm53-flash.sh" "$@"
+exec bash "$root_dir/scripts/launch-glm53-flash.sh" "$@"

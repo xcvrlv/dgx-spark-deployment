@@ -9,4 +9,4 @@ export DEPLOYMENT_SLUG="${DEPLOYMENT_SLUG:-glm52-sparkring-switch}"
 export DEPLOYMENT_LABEL="${DEPLOYMENT_LABEL:-GLM-5.2 SparkRing-compatible switched fabric}"
 export LOCAL_ENV_FILE="${LOCAL_ENV_FILE:-$root_dir/.env.sparkring-switch}"
 
-exec "$root_dir/scripts/launch-glm53-flash.sh" "$@"
+exec bash "$root_dir/scripts/launch-glm53-flash.sh" "$@"
