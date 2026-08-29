@@ -144,7 +144,8 @@ model slot and is not presented as a model revision or content hash.
 ## Qualification gates
 
 - image labels identify the pinned SparkRing revision and its runtime verifier
-  passes on all four ranks;
+  passes on all four ranks with the image's CUDA forward-compatibility driver
+  library preloaded;
 - config/index readability and every referenced local shard pass on all ranks;
 - both switch rails pass RoCE validation without retries, fallback to sockets,
   or asymmetric HCA selection;

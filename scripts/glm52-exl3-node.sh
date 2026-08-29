@@ -218,6 +218,13 @@ prepare_node() {
 }
 
 preflight_node() {
+  local -a cuda_compat_env=()
+  if [[ "$RUNTIME_CONTRACT" == "sparkring-r7-switch-q40" ]]; then
+    cuda_compat_env=(
+      -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1
+      -e VLLM_NCCL_SO_PATH=/opt/sparkring/nccl/libnccl.so.2
+    )
+  fi
   command -v docker >/dev/null
   command -v ip >/dev/null
   docker info >/dev/null
@@ -308,7 +315,7 @@ PY
         echo "SparkRing image revision mismatch: have $image_revision, want $SPARKRING_UPSTREAM_COMMIT" >&2
         return 1
       }
-      docker run --rm --gpus all "$IMAGE" /bin/true >/dev/null
+      docker run --rm --gpus all "${cuda_compat_env[@]}" "$IMAGE" /bin/true >/dev/null
       ;;
     *) echo "unsupported RUNTIME_CONTRACT=$RUNTIME_CONTRACT" >&2; return 1 ;;
   esac
@@ -340,10 +347,10 @@ if sys.argv[4] and manifest["files"]["exl3.py"]["sha256"] != sys.argv[4]:
 PY
   fi
 
-  docker run --rm --gpus all --entrypoint python3 "$IMAGE" -c \
+  docker run --rm --gpus all --entrypoint python3 "${cuda_compat_env[@]}" "$IMAGE" -c \
     'import importlib,sys,torch; cap=torch.cuda.get_device_capability(); assert cap == (12, 1), cap; import b12x,vllm; sys.path[:0]=["/opt/exllamav3","/opt/exllamav3-python"]; ext=importlib.import_module("exllamav3_ext"); assert hasattr(ext,"exl3_moe_fused_retile"); print("SM121 EXL3 imports ok")' \
     >/dev/null
-  docker run --rm --entrypoint python3 "$IMAGE" -c \
+  docker run --rm --gpus all --entrypoint python3 "${cuda_compat_env[@]}" "$IMAGE" -c \
     'from pathlib import Path; import vllm; root=Path(vllm.__file__).parent; assert (root / "model_executor/layers/quantization/exl3.py").is_file(); assert (root / "v1/attention/backends/mla/b12x_mla_sparse.py").is_file()' \
     >/dev/null
   docker run --rm --entrypoint sh \
@@ -355,7 +362,8 @@ PY
     }
 
   local serve_help
-  serve_help="$(docker run --rm --gpus all --entrypoint vllm "$IMAGE" serve --help=all)"
+  serve_help="$(docker run --rm --gpus all --entrypoint vllm \
+    "${cuda_compat_env[@]}" "$IMAGE" serve --help=all)"
   for flag in --attention-backend --moe-backend --quantization-config --decode-context-parallel-size --nnodes --node-rank --block-size; do
     grep -Fq -- "$flag" <<<"$serve_help" || {
       echo "image does not support required vLLM flag: $flag" >&2

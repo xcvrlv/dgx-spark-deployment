@@ -419,6 +419,8 @@ def decode(logits):
             "VLLM_B12X_MLA_CKV_GATHER",
             "SPARK_Q40_EXACT_STATE_ATTEST_PATH",
             "SPARK_Q40_EXACT_STATE_CHECKPOINT=$Q40_CHECKPOINT_REVISION",
+            'cuda_compat_env=(\n      -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1',
+            'docker run --rm --gpus all "${cuda_compat_env[@]}" "$IMAGE" /bin/true',
             'NCCL_CROSS_NIC=$NCCL_CROSS_NIC',
         ):
             self.assertIn(fragment, node)
