@@ -84,7 +84,8 @@ bash scripts/launch-glm52-sparkring-switch.sh benchmark
 If the runtime image is not present, explicitly run `build` first. That action
 checks out the pinned SparkRing source, pulls its immutable parent, builds the
 runtime and Q40 overlays on rank 0, and distributes them. Audit and set
-`SPARKRING_BASE_IMAGE_LICENSES` before invoking it.
+`SPARKRING_BASE_IMAGE_LICENSES` only if the immutable parent's own
+`org.opencontainers.image.licenses` label needs an audited override.
 
 The repository's `benchmark` action is a functional deployment diagnostic. It
 is not the `llm_decode_bench.py` normalized harness used for SparkRing's

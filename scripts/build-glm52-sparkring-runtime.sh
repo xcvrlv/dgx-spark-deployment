@@ -5,7 +5,7 @@ set -euo pipefail
 image="${IMAGE:?IMAGE is required}"
 revision="${SPARKRING_UPSTREAM_COMMIT:?SPARKRING_UPSTREAM_COMMIT is required}"
 base_image="${SPARKRING_BASE_IMAGE:?SPARKRING_BASE_IMAGE is required}"
-base_licenses="${SPARKRING_BASE_IMAGE_LICENSES:?set SPARKRING_BASE_IMAGE_LICENSES to the audited SPDX expression}"
+base_licenses="${SPARKRING_BASE_IMAGE_LICENSES:-}"
 build_root="${SPARKRING_BUILD_ROOT:-/var/tmp/sparkring-r7-build}"
 q40_root="${Q40_HOST_PATH:-/var/tmp/sparkring-q40-exact-state-v1}"
 model_revision="${MODEL_REVISION:?MODEL_REVISION is required}"
@@ -26,6 +26,16 @@ git -C "$source_root" diff --quiet
 
 docker pull "$base_image"
 base_image_id="$(docker image inspect "$base_image" --format '{{.Id}}')"
+if [[ -z "$base_licenses" ]]; then
+  base_licenses="$(docker image inspect "$base_image" \
+    --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')"
+  if [[ -z "$base_licenses" || "$base_licenses" == "<no value>" ]]; then
+    echo "The immutable parent has no org.opencontainers.image.licenses label." >&2
+    echo "Audit that parent and set SPARKRING_BASE_IMAGE_LICENSES to its SPDX expression." >&2
+    exit 2
+  fi
+  echo "Using parent OCI license expression: $base_licenses"
+fi
 
 if [[ -d "$prepared_root" ]]; then
   python3 "$source_root/runtime/exl3-r7/prepare_context.py" \

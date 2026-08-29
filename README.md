@@ -213,8 +213,9 @@ bash scripts/launch-glm52-sparkring-switch.sh start
 
 Run `bash scripts/launch-glm52-sparkring-switch.sh build` separately if the
 pinned runtime image and Q40 overlay are not already installed. That explicit
-action requires network access and the audited `SPARKRING_BASE_IMAGE_LICENSES`
-value. Model selection is operator-managed and lenient: point `MODEL_HOST_PATH`
+action requires network access. It records the immutable parent's OCI license
+label automatically; `SPARKRING_BASE_IMAGE_LICENSES` is an optional audited
+override. Model selection is operator-managed and lenient: point `MODEL_HOST_PATH`
 at another ready EXL model directory or Hugging Face repository-cache root.
 Optional hashes and shard-count fields can be set when strict model pinning is
 wanted. This path is implemented but not fleet-qualified. See
