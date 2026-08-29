@@ -312,8 +312,8 @@ def decode(logits):
             "CUTE_DSL_ARCH=sm_121a",
             "VLLM_EXL3_ONLINE_CACHE_DIR=/cache/exl3-online",
             "VLLM_EXL3_EXT_PATH=/opt/exllamav3",
-            'tail.get("format") != "exl3-trellis"',
-            'tail.get("tp") != 4',
+            'warning: config has no recognized EXL marker',
+            'tail.get("tp") not in (None, 4)',
             '"local-inference.vllm.integration.tree"',
             '"local-inference.b12x.integration.tree"',
         )
@@ -347,10 +347,12 @@ def decode(logits):
         recipe = read_env(ROOT / "recipes/glm-5.2-exl3-sparkring-switch.env")
         expected = {
             "SPARKRING_UPSTREAM_COMMIT": "510556275ed3b77fc56a14367d319417072eeb8c",
-            "MODEL_CONFIG_SHA256": "fabb73eb513ec64f3a365da396b38de8d55b3930edfb11baeecbf34ecafa6126",
-            "MODEL_INDEX_SHA256": "9fd852f69ed64442e31dce1cbc5fe7acd0a76bfb848e945d272fe98d00d0c9cd",
-            "MODEL_SHARD_COUNT": "157",
-            "MODEL_INDEX_TOTAL_SIZE": "346218639128",
+            "MODEL_PROVISIONING": "local",
+            "PREPARE_IMAGE": "0",
+            "MODEL_ID": "davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw",
+            "MODEL_HOST_PATH": "/home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw",
+            "MODEL_CONTAINER_PATH": "auto",
+            "ALLOW_UNVERIFIED_MODEL": "1",
             "DECODE_CONTEXT_PARALLEL_SIZE": "4",
             "DCP_COMM_BACKEND": "ag_rs",
             "DCP_KV_CACHE_INTERLEAVE_SIZE": "1",
@@ -380,15 +382,19 @@ def decode(logits):
         self.assertIn('"cudagraph_capture_sizes":[1,2,3,4,5', recipe["COMPILATION_CONFIG"])
         self.assertIn('38,39,40]', recipe["COMPILATION_CONFIG"])
         self.assertEqual(recipe["NCCL_ALGO"], "")
+        self.assertEqual(recipe["MODEL_CONFIG_SHA256"], "")
+        self.assertEqual(recipe["MODEL_INDEX_SHA256"], "")
+        self.assertEqual(recipe["MODEL_SHARD_COUNT"], "")
+        self.assertEqual(recipe["MODEL_INDEX_TOTAL_SIZE"], "")
         self.assertNotIn("NCCL_SKIP_TREE_CONNECT", recipe)
 
     def test_sparkring_switch_launcher_uses_upstream_runtime_without_sircl(self) -> None:
         builder = (ROOT / "scripts/build-glm52-sparkring-runtime.sh").read_text()
         node = (ROOT / "scripts/glm52-exl3-node.sh").read_text()
+        launcher = (ROOT / "scripts/launch-glm53-flash.sh").read_text()
         wrapper = (ROOT / "scripts/launch-glm52-sparkring-switch.sh").read_text()
         for fragment in (
             "runtime/exl3-r7/build-image.sh",
-            "download_exl3_r7.py",
             "prepare_q40_overlay_inputs.py",
             "q40_exact_state_overlay.py",
             "q40_exact_state_attestation_overlay.py",
@@ -396,6 +402,9 @@ def decode(logits):
         ):
             self.assertIn(fragment, builder)
         for fragment in (
+            'if [[ "$MODEL_PROVISIONING" == "local" ]]',
+            "local model ready at $effective_model_host_path (offline; no files downloaded)",
+            'effective_model_container_path="$MODEL_MOUNT_CONTAINER_PATH/snapshots/$revision"',
             '--dcp-comm-backend "$DCP_COMM_BACKEND"',
             '--dcp-kv-cache-interleave-size "$DCP_KV_CACHE_INTERLEAVE_SIZE"',
             '--block-size "$BLOCK_SIZE"',
@@ -408,6 +417,9 @@ def decode(logits):
             self.assertIn(fragment, node)
         self.assertNotIn("VLLM_SPARK_TP4_MODE=custom", node)
         self.assertNotIn("NCCL_SKIP_TREE_CONNECT", node)
+        self.assertNotIn("download_exl3_r7.py", builder)
+        self.assertIn('if [[ "$PREPARE_IMAGE" == "1" ]]', launcher)
+        self.assertIn("PREPARE_IMAGE=0: using the existing runtime image and local model files", launcher)
         self.assertIn("glm-5.2-exl3-sparkring-switch.env", wrapper)
 
 

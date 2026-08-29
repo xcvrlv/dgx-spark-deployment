@@ -35,6 +35,8 @@ fi
 [[ -f "$local_env_file" ]] && source "$local_env_file"
 MODEL_MOUNT_HOST_PATH="${MODEL_MOUNT_HOST_PATH:-$MODEL_HOST_PATH}"
 MODEL_MOUNT_CONTAINER_PATH="${MODEL_MOUNT_CONTAINER_PATH:-$MODEL_CONTAINER_PATH}"
+MODEL_PROVISIONING="${MODEL_PROVISIONING:-download}"
+PREPARE_IMAGE="${PREPARE_IMAGE:-1}"
 IMAGE_BUILD_SCRIPT="${IMAGE_BUILD_SCRIPT:-}"
 SPARKRING_UPSTREAM_COMMIT="${SPARKRING_UPSTREAM_COMMIT:-}"
 RUNTIME_CONTRACT="${RUNTIME_CONTRACT:-local-inference}"
@@ -72,8 +74,8 @@ action="${1:-start}"
 selected_rank="${2:-}"
 [[ "${TP_NODE_COUNT:-}" == "4" ]] || { echo "this recipe requires TP_NODE_COUNT=4" >&2; exit 2; }
 [[ "$CLUSTER_RAIL" =~ ^CX[01]$ ]] || { echo "CLUSTER_RAIL must be CX0 or CX1" >&2; exit 2; }
-[[ "$BUILD_IMAGE" =~ ^[01]$ && "$PULL_IMAGE" =~ ^[01]$ ]] || {
-  echo "BUILD_IMAGE and PULL_IMAGE must be 0 or 1" >&2
+[[ "$BUILD_IMAGE" =~ ^[01]$ && "$PULL_IMAGE" =~ ^[01]$ && "$PREPARE_IMAGE" =~ ^[01]$ ]] || {
+  echo "BUILD_IMAGE, PULL_IMAGE, and PREPARE_IMAGE must be 0 or 1" >&2
   exit 2
 }
 [[ "$BUILD_IMAGE" != "1" || "$PULL_IMAGE" != "1" ]] || {
@@ -125,10 +127,6 @@ if [[ "$NETWORK_TOPOLOGY" == "switch-star-dual-rail" ]]; then
 fi
 if [[ "$RUNTIME_CONTRACT" == "sparkring-r7-switch-q40" ]]; then
   contract_values=(
-    "MODEL_ID=brandonmusic/GLM-5.2-EXL3-TR3v4-3.5bpw-MTP78"
-    "MODEL_REVISION=9ab9579774cc432df91567a36f6e9e863e0d4c9f"
-    "MODEL_CONFIG_SHA256=fabb73eb513ec64f3a365da396b38de8d55b3930edfb11baeecbf34ecafa6126"
-    "MODEL_INDEX_SHA256=9fd852f69ed64442e31dce1cbc5fe7acd0a76bfb848e945d272fe98d00d0c9cd"
     "DECODE_CONTEXT_PARALLEL_SIZE=4" "DCP_COMM_BACKEND=ag_rs"
     "DCP_KV_CACHE_INTERLEAVE_SIZE=1" "MTP_SPECULATIVE_TOKENS=4"
     "MTP_DRAFT_TP_SIZE=4" "MTP_MOE_BACKEND=b12x"
@@ -136,7 +134,7 @@ if [[ "$RUNTIME_CONTRACT" == "sparkring-r7-switch-q40" ]]; then
     "MAX_NUM_BATCHED_TOKENS=4096" "BLOCK_SIZE=64"
     "KV_CACHE_DTYPE=nvfp4_ds_mla" "KV_CACHE_MEMORY_BYTES=9250000000"
     "VLLM_EXL3_PREFILL_CAPACITY=4096" "VLLM_SPARK_MAX_QUERY_ROWS=40"
-    "MAX_CUDAGRAPH_CAPTURE_SIZE=40" "Q40_ENABLED=1"
+    "MAX_CUDAGRAPH_CAPTURE_SIZE=40"
   )
   for contract_value in "${contract_values[@]}"; do
     contract_name="${contract_value%%=*}"
@@ -194,6 +192,7 @@ remote_node() {
   local assignments=(
     "IMAGE=$IMAGE" "CONTAINER_NAME=$CONTAINER_NAME"
     "MODEL_ID=$MODEL_ID" "MODEL_REVISION=$MODEL_REVISION"
+    "MODEL_PROVISIONING=$MODEL_PROVISIONING"
     "MODEL_CONFIG_SHA256=$MODEL_CONFIG_SHA256" "MODEL_INDEX_SHA256=$MODEL_INDEX_SHA256"
     "MODEL_SHARD_COUNT=$MODEL_SHARD_COUNT" "MODEL_INDEX_TOTAL_SIZE=$MODEL_INDEX_TOTAL_SIZE"
     "MODEL_HOST_PATH=$MODEL_HOST_PATH" "MODEL_MOUNT_HOST_PATH=$MODEL_MOUNT_HOST_PATH"
@@ -416,7 +415,11 @@ case "$action" in
     prepare_image
     ;;
   prepare)
-    prepare_image
+    if [[ "$PREPARE_IMAGE" == "1" ]]; then
+      prepare_image
+    else
+      echo "PREPARE_IMAGE=0: using the existing runtime image and local model files; no build or pull will run."
+    fi
     run_all_parallel prepare
     ;;
   preflight) run_all_parallel preflight ;;

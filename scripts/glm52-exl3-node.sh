@@ -9,6 +9,7 @@ head_ip="${4:?missing head IP}"
 required_env=(
   IMAGE CONTAINER_NAME MODEL_ID MODEL_REVISION MODEL_HOST_PATH MODEL_MOUNT_HOST_PATH
   MODEL_MOUNT_CONTAINER_PATH MODEL_CONTAINER_PATH CACHE_HOST_PATH LOG_HOST_PATH
+  MODEL_PROVISIONING
   MODEL_CONFIG_SHA256 MODEL_INDEX_SHA256 MODEL_SHARD_COUNT MODEL_INDEX_TOTAL_SIZE
   RUNTIME_CONTRACT SPARKRING_UPSTREAM_COMMIT Q40_ENABLED Q40_HOST_PATH Q40_EXL3_SHA256
   SERVED_MODEL_NAME API_PORT MASTER_PORT MAX_MODEL_LEN MAX_NUM_SEQS
@@ -36,6 +37,52 @@ required_env=(
 for name in "${required_env[@]}"; do
   [[ -n "${!name+x}" ]] || { echo "missing environment variable: $name" >&2; exit 2; }
 done
+
+effective_model_host_path="$MODEL_HOST_PATH"
+effective_model_mount_host_path="$MODEL_MOUNT_HOST_PATH"
+effective_model_mount_container_path="$MODEL_MOUNT_CONTAINER_PATH"
+effective_model_container_path="$MODEL_CONTAINER_PATH"
+
+resolve_model_paths() {
+  effective_model_host_path="$MODEL_HOST_PATH"
+  effective_model_mount_host_path="$MODEL_MOUNT_HOST_PATH"
+  effective_model_mount_container_path="$MODEL_MOUNT_CONTAINER_PATH"
+  effective_model_container_path="$MODEL_CONTAINER_PATH"
+
+  if [[ -f "$MODEL_HOST_PATH/config.json" && -f "$MODEL_HOST_PATH/model.safetensors.index.json" ]]; then
+    if [[ "$MODEL_CONTAINER_PATH" == "auto" ]]; then
+      effective_model_container_path="$MODEL_MOUNT_CONTAINER_PATH"
+    fi
+    return
+  fi
+
+  [[ -d "$MODEL_HOST_PATH/snapshots" ]] || {
+    echo "local model is neither a ready model directory nor a Hugging Face cache root: $MODEL_HOST_PATH" >&2
+    return 1
+  }
+
+  local revision="" candidate=""
+  if [[ -f "$MODEL_HOST_PATH/refs/main" ]]; then
+    revision="$(tr -d '\r\n' <"$MODEL_HOST_PATH/refs/main")"
+    candidate="$MODEL_HOST_PATH/snapshots/$revision"
+    if [[ ! -f "$candidate/config.json" || ! -f "$candidate/model.safetensors.index.json" ]]; then
+      echo "refs/main points to an incomplete local snapshot: $candidate" >&2
+      return 1
+    fi
+  else
+    candidate="$(find "$MODEL_HOST_PATH/snapshots" -mindepth 2 -maxdepth 2 \
+      -name config.json -printf '%T@ %h\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
+    [[ -n "$candidate" && -f "$candidate/model.safetensors.index.json" ]] || {
+      echo "no complete local snapshot found under $MODEL_HOST_PATH/snapshots" >&2
+      return 1
+    }
+    revision="$(basename -- "$candidate")"
+    echo "refs/main is absent; using newest complete local snapshot $revision" >&2
+  fi
+
+  effective_model_host_path="$candidate"
+  effective_model_container_path="$MODEL_MOUNT_CONTAINER_PATH/snapshots/$revision"
+}
 
 resolve_fabric_iface() {
   if [[ -n "${FABRIC_IFACE:-}" ]]; then
@@ -87,29 +134,31 @@ capture_logs() {
 
 prepare_node() {
   command -v docker >/dev/null
-  mkdir -p "$MODEL_HOST_PATH" "$CACHE_HOST_PATH" "$LOG_HOST_PATH"
+  mkdir -p "$CACHE_HOST_PATH" "$LOG_HOST_PATH"
+  if [[ "$MODEL_PROVISIONING" == "local" ]]; then
+    docker image inspect "$IMAGE" >/dev/null
+    resolve_model_paths
+    test -f "$effective_model_host_path/config.json"
+    test -f "$effective_model_host_path/model.safetensors.index.json"
+    echo "rank=$rank local model ready at $effective_model_host_path (offline; no files downloaded)"
+    return
+  fi
+
+  [[ "$MODEL_PROVISIONING" == "download" ]] || {
+    echo "unsupported MODEL_PROVISIONING=$MODEL_PROVISIONING" >&2
+    return 1
+  }
+  mkdir -p "$MODEL_HOST_PATH"
   if [[ "$PULL_IMAGE" == "1" ]]; then
     docker pull "$IMAGE"
   else
     docker image inspect "$IMAGE" >/dev/null
   fi
-  if [[ "$RUNTIME_CONTRACT" == "sparkring-r7-switch-q40" ]]; then
-    test -f "$Q40_HOST_PATH/download_exl3_r7.py"
-    docker run --rm --network host \
-      --entrypoint /opt/venv/bin/python \
-      -v "$MODEL_HOST_PATH:/model" \
-      -v "$Q40_HOST_PATH/download_exl3_r7.py:/opt/spark-deployment/download_exl3_r7.py:ro" \
-      -v "$CACHE_HOST_PATH:/cache" \
-      -e HF_HOME=/cache/huggingface \
-      "$IMAGE" /opt/spark-deployment/download_exl3_r7.py download \
-      --model-path /model
-  else
-    docker run --rm --network host --entrypoint bash \
-      -v "$MODEL_HOST_PATH:/model" -v "$CACHE_HOST_PATH:/cache" \
-      -e HF_HOME=/cache/huggingface "$IMAGE" -lc \
-      'hf download "$1" --revision "$2" --local-dir /model' \
-      _ "$MODEL_ID" "$MODEL_REVISION"
-  fi
+  docker run --rm --network host --entrypoint bash \
+    -v "$MODEL_HOST_PATH:/model" -v "$CACHE_HOST_PATH:/cache" \
+    -e HF_HOME=/cache/huggingface "$IMAGE" -lc \
+    'hf download "$1" --revision "$2" --local-dir /model' \
+    _ "$MODEL_ID" "$MODEL_REVISION"
   test -f "$MODEL_HOST_PATH/config.json"
   test -f "$MODEL_HOST_PATH/model.safetensors.index.json"
   printf '%s\n' "$MODEL_REVISION" >"$MODEL_HOST_PATH/.spark-deployment-revision"
@@ -121,11 +170,12 @@ preflight_node() {
   command -v ip >/dev/null
   docker info >/dev/null
   docker image inspect "$IMAGE" >/dev/null
-  test -f "$MODEL_HOST_PATH/config.json"
-  test -f "$MODEL_HOST_PATH/model.safetensors.index.json"
+  resolve_model_paths
+  test -f "$effective_model_host_path/config.json"
+  test -f "$effective_model_host_path/model.safetensors.index.json"
   test -d /dev/infiniband
 
-  python3 - "$MODEL_HOST_PATH" "$MODEL_CONFIG_SHA256" "$MODEL_INDEX_SHA256" \
+  python3 - "$effective_model_host_path" "$MODEL_CONFIG_SHA256" "$MODEL_INDEX_SHA256" \
     "$MODEL_SHARD_COUNT" "$MODEL_INDEX_TOTAL_SIZE" <<'PY'
 import hashlib
 import json
@@ -143,12 +193,14 @@ if expected_index_sha and hashlib.sha256(index_path.read_bytes()).hexdigest() !=
     raise SystemExit("model index SHA-256 mismatch")
 config = json.loads(config_path.read_text())
 tail = config.get("hybrid_tr3_tail", {})
-if tail.get("format") != "exl3-trellis":
-    raise SystemExit(f"unexpected EXL3 format: {tail.get('format')!r}")
-if tail.get("tp") != 4:
-    raise SystemExit(f"checkpoint is not rank-sliced for TP4: {tail.get('tp')!r}")
-if config.get("num_nextn_predict_layers") != 1:
-    raise SystemExit("checkpoint does not expose the expected MTP78 layer")
+if tail.get("tp") not in (None, 4):
+    raise SystemExit(f"checkpoint declares incompatible TP slicing: {tail.get('tp')!r}")
+formats = {
+    str(tail.get("format", "")).lower(),
+    str(config.get("quantization_config", {}).get("quant_method", "")).lower(),
+}
+if not any("exl" in value for value in formats):
+    print("warning: config has no recognized EXL marker; deferring compatibility to vLLM", file=sys.stderr)
 index = json.loads(index_path.read_text())
 shards = sorted(set(index.get("weight_map", {}).values()))
 if not shards:
@@ -175,7 +227,9 @@ PY
     echo "fabric interface $iface has MTU $iface_mtu; switched profile requires at least 9000" >&2
     return 1
   }
-  if [[ -f "$MODEL_HOST_PATH/.spark-deployment-revision" ]]; then
+  if [[ "$MODEL_PROVISIONING" == "local" ]]; then
+    : # The operator owns local model identity and lifecycle.
+  elif [[ -f "$MODEL_HOST_PATH/.spark-deployment-revision" ]]; then
     installed_revision="$(<"$MODEL_HOST_PATH/.spark-deployment-revision")"
     [[ "$installed_revision" == "$MODEL_REVISION" ]] || {
       echo "model revision mismatch: have $installed_revision, want $MODEL_REVISION" >&2
@@ -213,7 +267,6 @@ PY
   esac
 
   if [[ "$Q40_ENABLED" == "1" ]]; then
-    test -f "$Q40_HOST_PATH/download_exl3_r7.py"
     test -f "$Q40_HOST_PATH/exl3.py"
     test -f "$Q40_HOST_PATH/model_runner.py"
     test -f "$Q40_HOST_PATH/manifest.json"
@@ -231,7 +284,7 @@ if manifest.get("image_id") != sys.argv[2]:
     raise SystemExit("Q40 bundle was generated for a different image ID")
 if manifest.get("model_revision") != sys.argv[3]:
     raise SystemExit("Q40 bundle was generated for a different model revision")
-for name in ("download_exl3_r7.py", "exl3.py", "model_runner.py"):
+for name in ("exl3.py", "model_runner.py"):
     digest = hashlib.sha256((root / name).read_bytes()).hexdigest()
     if manifest.get("files", {}).get(name, {}).get("sha256") != digest:
         raise SystemExit(f"Q40 {name} hash mismatch")
@@ -247,10 +300,10 @@ PY
     'from pathlib import Path; import vllm; root=Path(vllm.__file__).parent; assert (root / "model_executor/layers/quantization/exl3.py").is_file(); assert (root / "v1/attention/backends/mla/b12x_mla_sparse.py").is_file()' \
     >/dev/null
   docker run --rm --entrypoint sh \
-    -v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro" \
+    -v "$effective_model_mount_host_path:$effective_model_mount_container_path:ro" \
     "$IMAGE" -c 'test -f "$1/config.json" && test -f "$1/model.safetensors.index.json"' \
-    _ "$MODEL_CONTAINER_PATH" || {
-      echo "model is not readable in the container at $MODEL_CONTAINER_PATH" >&2
+    _ "$effective_model_container_path" || {
+      echo "model is not readable in the container at $effective_model_container_path" >&2
       return 1
     }
 
@@ -324,7 +377,7 @@ start_node() {
   [[ -z "$NCCL_IB_ADDR_RANGE" ]] || nccl_tuning_env+=(-e "NCCL_IB_ADDR_RANGE=$NCCL_IB_ADDR_RANGE")
 
   local serve_args=(
-    "$MODEL_CONTAINER_PATH"
+    "$effective_model_container_path"
     --served-model-name "$SERVED_MODEL_NAME"
     --host 0.0.0.0
     --port "$API_PORT"
@@ -375,9 +428,9 @@ start_node() {
     local local_argmax=false
     [[ "$MTP_USE_LOCAL_ARGMAX_REDUCTION" == "1" ]] && local_argmax=true
     if [[ "$RUNTIME_CONTRACT" == "sparkring-r7-switch-q40" ]]; then
-      serve_args+=(--speculative-config "{\"model\":\"$MODEL_CONTAINER_PATH\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"quantization\":\"exl3\",\"moe_backend\":\"$MTP_MOE_BACKEND\",\"attention_backend\":\"$ATTENTION_BACKEND\",\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\"}")
+      serve_args+=(--speculative-config "{\"model\":\"$effective_model_container_path\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"quantization\":\"exl3\",\"moe_backend\":\"$MTP_MOE_BACKEND\",\"attention_backend\":\"$ATTENTION_BACKEND\",\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\"}")
     else
-      serve_args+=(--speculative-config "{\"model\":\"$MODEL_CONTAINER_PATH\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"moe_backend\":\"$MTP_MOE_BACKEND\",\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\",\"rejection_sample_method\":\"$MTP_REJECTION_SAMPLE_METHOD\"}")
+      serve_args+=(--speculative-config "{\"model\":\"$effective_model_container_path\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_SPECULATIVE_TOKENS,\"draft_tensor_parallel_size\":$MTP_DRAFT_TP_SIZE,\"moe_backend\":\"$MTP_MOE_BACKEND\",\"use_local_argmax_reduction\":$local_argmax,\"draft_sample_method\":\"$MTP_DRAFT_SAMPLE_METHOD\",\"rejection_sample_method\":\"$MTP_REJECTION_SAMPLE_METHOD\"}")
     fi
   fi
   serve_args+=("${headless[@]}")
@@ -391,7 +444,7 @@ start_node() {
     --memory "$CONTAINER_MEMORY" --memory-swap "$CONTAINER_MEMORY" \
     --ulimit memlock=-1:-1 --ulimit "nofile=$CONTAINER_NOFILE:$CONTAINER_NOFILE" \
     --cap-add IPC_LOCK --device /dev/infiniband:/dev/infiniband \
-    -v "$MODEL_MOUNT_HOST_PATH:$MODEL_MOUNT_CONTAINER_PATH:ro" \
+    -v "$effective_model_mount_host_path:$effective_model_mount_container_path:ro" \
     -v "$CACHE_HOST_PATH:/cache" \
     "${extra_mounts[@]}" \
     -e "VLLM_HOST_IP=$host_ip" \

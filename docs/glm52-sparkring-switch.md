@@ -3,10 +3,10 @@
 ## Status
 
 This is an **implementation-ready, unqualified switch port** of SparkRing's
-GLM-5.2 EXL3 3.5-bpw serving contract. The configuration, pinned upstream
-runtime builder, image-bound exact-Q40 overlay generation, launcher wiring,
-and fail-fast checks are present. The image build and four-node GPU run still
-have to be executed on the Spark fleet.
+R7 serving runtime. The runtime and performance topology remain pinned, while
+the checkpoint is deliberately operator-managed so compatible EXL variants
+can be swapped without editing the launcher. The image build and four-node GPU
+run still have to be executed on the Spark fleet.
 
 The reference is SparkRing commit
 `510556275ed3b77fc56a14367d319417072eeb8c`. Pinning is important because the
@@ -14,13 +14,13 @@ upstream repository changes rapidly.
 
 ## What remains identical
 
-The switched recipe preserves the model-facing and execution contract from
-SparkRing's GLM-5.2 quickstart:
+The switched recipe preserves the execution contract from SparkRing's GLM-5.2
+quickstart while deliberately relaxing checkpoint identity:
 
 | Setting | Switched recipe |
 |---|---|
-| Checkpoint | `brandonmusic/GLM-5.2-EXL3-TR3v4-3.5bpw-MTP78@9ab9579...` |
-| Model integrity | Config/index pins plus every shard's pinned-revision LFS SHA-256, 157 shards, 346,218,639,128 indexed bytes |
+| Default checkpoint | Local `davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw` Hugging Face cache on every node |
+| Model ownership | Operator-provisioned and offline; config/index and referenced shard presence are checked, while hashes/counts are optional |
 | Parallelism | TP4, DCP4, `ag_rs`, KV interleave 1 |
 | Speculation | Fixed MTP4, draft TP4, B12X target and draft MoE |
 | Context and concurrency | 1,048,576 tokens, 16 sequences, 4,096 batched tokens |
@@ -63,20 +63,28 @@ published SparkRing numbers.
 
 ## Build and launch
 
-First audit the SPDX license expression for the immutable parent image and set
-it locally. It is intentionally not guessed by the repository.
+The default `prepare` action is completely offline. It does not build or pull
+an image and does not contact Hugging Face. It checks that the existing runtime
+image and local model are present on every node. The configured path is a
+Hugging Face repository-cache root; the node launcher follows local `refs/main`
+and mounts the whole repository so snapshot-to-blob symlinks remain valid.
 
 ```bash
 cp .env.example .env.sparkring-switch
-# Set SPARK_SSH_USER and SPARKRING_BASE_IMAGE_LICENSES in that file.
+# Set SPARK_SSH_USER in that file.
 # Override NCCL_IB_HCA if the two adapters are not mlx5_0 and mlx5_1.
 
-# `prepare` builds/distributes the runtime and downloads/verifies the model.
+# Offline local checks only. Nothing is downloaded.
 bash scripts/launch-glm52-sparkring-switch.sh prepare
 bash scripts/launch-glm52-sparkring-switch.sh preflight
 bash scripts/launch-glm52-sparkring-switch.sh start
 bash scripts/launch-glm52-sparkring-switch.sh benchmark
 ```
+
+If the runtime image is not present, explicitly run `build` first. That action
+checks out the pinned SparkRing source, pulls its immutable parent, builds the
+runtime and Q40 overlays on rank 0, and distributes them. Audit and set
+`SPARKRING_BASE_IMAGE_LICENSES` before invoking it.
 
 The repository's `benchmark` action is a functional deployment diagnostic. It
 is not the `llm_decode_bench.py` normalized harness used for SparkRing's
@@ -86,31 +94,32 @@ directly with that table. A performance claim requires obtaining and
 hash-verifying that external harness, then reproducing its cold, unique-prompt
 2K/8K/16K/32K/64K/128K and C1/C2/C4/C8 matrix on both topologies.
 
-Use the `build` action instead when the pinned model is already present on all
-four ranks and only the runtime image/Q40 bundle needs to be rebuilt.
-
 The custom build path runs on rank 0. It checks out the pinned SparkRing
 revision, uses SparkRing's receipt-gated R7 image builder, generates the two
 exact-Q40 overlays for the produced immutable image ID, and then distributes
-the image, exact model verifier, and overlays to ranks 1-3. The `prepare`
-action runs SparkRing's full pinned-revision LFS hash verification on every
-rank. Preflight rejects image, model, overlay, or revision drift before a
-serving container starts.
+the image and overlays to ranks 1-3. Preflight checks the local model index and
+all referenced shards but does not require a repository identity, revision
+marker, fixed shard count, or content hashes unless the operator supplies
+those optional values.
 
 The wrapper deliberately uses `.env.sparkring-switch`, not the shared `.env`,
-so model paths or revisions from the GLM-5.3 deployment cannot override this
-hash-bound contract. Set `LOCAL_ENV_FILE` explicitly if another ignored local
-file is preferred.
+so paths from another deployment do not accidentally override this target.
+Set `LOCAL_ENV_FILE` explicitly if another ignored local file is preferred.
 
 Exact-Q40 receipts are create-once upstream. On restart, the node launcher
 moves an existing receipt to a timestamped backup before starting, preserving
 the evidence while giving the new process a fresh namespace.
 
-## Future model candidates
+## Changing the EXL model
 
-Do not replace only `MODEL_ID`. A candidate needs its own immutable revision,
-config/index hashes, shard count, indexed byte size, served name, model/cache
-paths, and then validation of:
+The user owns model provisioning. Set `MODEL_HOST_PATH` and
+`MODEL_MOUNT_HOST_PATH` to either a ready model directory or its Hugging Face
+repository-cache root, then update `MODEL_ID` and `SERVED_MODEL_NAME` for
+reporting. No download is attempted. Optional config/index hashes, shard count,
+and indexed byte size can be supplied to tighten validation.
+
+Lenient selection does not imply universal compatibility. Qualify a materially
+different model for:
 
 1. architecture and TP4 checkpoint slicing;
 2. tokenizer, reasoning parser, tool parser, and chat template;
@@ -120,15 +129,16 @@ paths, and then validation of:
 6. Q1-Q40 graph shapes and exact-Q40 target/draft state assumptions;
 7. dynamic NVFP4 KV record size, cache capacity, and long-context correctness.
 
-The existing Q40 overlay is bound specifically to the GLM-5.2 source bytes and
-layer geometry. It must be regenerated or replaced with a candidate-specific,
-hash-bound overlay; bypassing its guard is not a supported migration path.
+The exact-Q40 overlay remains image-bound and its runtime gates are enforced.
+If a model's layer geometry does not satisfy those gates, disable Q40 for an
+initial bring-up or rebuild/adjust the overlay instead of weakening its runtime
+attestation.
 
 ## Qualification gates
 
 - image labels identify the pinned SparkRing revision and its runtime verifier
   passes on all four ranks;
-- model hashes, shard inventory, and revision marker pass on all ranks;
+- config/index readability and every referenced local shard pass on all ranks;
 - both switch rails pass RoCE validation without retries, fallback to sockets,
   or asymmetric HCA selection;
 - all four exact-Q40 attestations are fresh and consistent;

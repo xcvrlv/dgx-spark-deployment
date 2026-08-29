@@ -203,16 +203,19 @@ a 9.25 GB/rank KV slab, full-CKV gather, Q1-Q40 graphs, and image-bound
 exact-Q40 overlays.
 
 ```bash
-# Create .env.sparkring-switch from .env.example and set its SSH user and the
-# audited SPARKRING_BASE_IMAGE_LICENSES value. `prepare` builds/distributes the
-# runtime and downloads/verifies the model.
+# Create .env.sparkring-switch from .env.example and set its SSH user. The
+# default model is already expected in juho's Hugging Face cache on every node.
+# `prepare` is offline: it neither builds/pulls an image nor downloads a model.
 bash scripts/launch-glm52-sparkring-switch.sh prepare
 bash scripts/launch-glm52-sparkring-switch.sh preflight
 bash scripts/launch-glm52-sparkring-switch.sh start
 ```
 
-This path is implemented but not fleet-qualified. The current GLM-5.2
-checkpoint is a reproducible stand-in; a future model candidate requires a
-new immutable serving contract and model-specific Q40 validation, not merely a
-checkpoint-name change. See
+Run `bash scripts/launch-glm52-sparkring-switch.sh build` separately if the
+pinned runtime image and Q40 overlay are not already installed. That explicit
+action requires network access and the audited `SPARKRING_BASE_IMAGE_LICENSES`
+value. Model selection is operator-managed and lenient: point `MODEL_HOST_PATH`
+at another ready EXL model directory or Hugging Face repository-cache root.
+Optional hashes and shard-count fields can be set when strict model pinning is
+wanted. This path is implemented but not fleet-qualified. See
 [`docs/glm52-sparkring-switch.md`](docs/glm52-sparkring-switch.md).

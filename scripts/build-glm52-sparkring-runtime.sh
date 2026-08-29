@@ -54,8 +54,6 @@ if [[ -d "$q40_root" ]]; then
   echo "Archived previous Q40 bundle at $backup"
 fi
 mkdir -p "$q40_root"
-install -m 0755 "$source_root/scripts/download_exl3_r7.py" \
-  "$q40_root/download_exl3_r7.py"
 python3 "$source_root/scripts/glm35_q40/q40_exact_state_overlay.py" \
   --source "$overlay_work/vllm/vllm/model_executor/layers/quantization/exl3.py" \
   --output "$q40_root/exl3.py"
@@ -73,7 +71,7 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 files = {}
-for name in ("download_exl3_r7.py", "exl3.py", "model_runner.py"):
+for name in ("exl3.py", "model_runner.py"):
     path = root / name
     files[name] = {
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
