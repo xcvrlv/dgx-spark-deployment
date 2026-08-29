@@ -25,6 +25,7 @@ required_env=(
   VLLM_B12X_MLA_CKV_GATHER VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS
   VLLM_SPARK_MAX_QUERY_ROWS VLLM_SPARK_MTP_MODE_ID VLLM_SPARK_MTP_TOKENS
   VLLM_SPARK_SHARED_CAPTURE_STREAM UMA_DROP_CACHES_BEFORE_START
+  VLLM_UMA_USE_MEM_AVAILABLE
   ENABLE_CHUNKED_PREFILL ENABLE_PREFIX_CACHING ASYNC_SCHEDULING
   DISABLE_CUSTOM_ALL_REDUCE COMPILATION_CONFIG VERIFY_CUDA_GRAPHS ENFORCE_EAGER
   CONTAINER_MEMORY CONTAINER_SHM_SIZE CONTAINER_NOFILE NCCL_IB_GID_INDEX
@@ -201,6 +202,91 @@ reclaim_uma_page_cache() {
     return 1
   fi
   awk '/^(MemFree|MemAvailable|Cached):/ { printf "%s %s %s\n", $1, $2, $3 }' /proc/meminfo
+}
+
+prepare_uma_memory_overlay() {
+  uma_utils_overlay=""
+  [[ "$VLLM_UMA_USE_MEM_AVAILABLE" == "1" ]] || return 0
+
+  local image_id overlay_dir source_path temp_path
+  image_id="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
+  overlay_dir="$CACHE_HOST_PATH/overlays/${image_id#sha256:}"
+  source_path=/opt/venv/lib/python3.12/site-packages/vllm/v1/worker/utils.py
+  uma_utils_overlay="$overlay_dir/utils.py"
+  mkdir -p "$overlay_dir"
+  temp_path="$(mktemp "$overlay_dir/utils.py.source.XXXXXX")"
+  docker run --rm --entrypoint cat "$IMAGE" "$source_path" >"$temp_path"
+
+  python3 - "$temp_path" "$uma_utils_overlay" <<'PY'
+import sys
+from pathlib import Path
+
+source_path = Path(sys.argv[1])
+output_path = Path(sys.argv[2])
+source = source_path.read_text(encoding="utf-8")
+marker = "GB10 UMA startup admission"
+
+if marker not in source:
+    import_anchor = "import math\n"
+    if source.count(import_anchor) != 1:
+        raise SystemExit("refusing UMA overlay: pinned utils.py import anchor drifted")
+    source = source.replace(import_anchor, "import math\nimport os\n", 1)
+
+    old = '''    if init_snapshot.free_memory < requested_memory:
+        raise ValueError(
+            f"Free memory on device {init_snapshot.device_} "
+            f"({format_gib(init_snapshot.free_memory)}/"
+'''
+    new = '''    available_memory = init_snapshot.free_memory
+    if os.getenv("VLLM_UMA_USE_MEM_AVAILABLE", "0") == "1":
+        try:
+            with open("/proc/meminfo", encoding="utf-8") as meminfo:
+                meminfo_kib = {
+                    parts[0].rstrip(":"): int(parts[1])
+                    for line in meminfo
+                    if len(parts := line.split()) >= 2 and parts[1].isdigit()
+                }
+            mem_available_kib = meminfo_kib["MemAvailable"]
+            available_memory = mem_available_kib * 1024
+            cgroup_current = 0
+            try:
+                with open(
+                    "/sys/fs/cgroup/memory.current", encoding="utf-8"
+                ) as current_file:
+                    cgroup_current = int(current_file.read().strip())
+            except (OSError, ValueError):
+                pass
+            logger.warning(
+                "GB10 UMA startup admission: CUDA MemFree=%s GiB, "
+                "Linux MemAvailable=%s GiB, Cached=%s GiB, "
+                "SReclaimable=%s GiB, Shmem=%s GiB, cgroup_current=%s GiB; "
+                "using MemAvailable",
+                format_gib(init_snapshot.free_memory),
+                format_gib(available_memory),
+                format_gib(meminfo_kib.get("Cached", 0) * 1024),
+                format_gib(meminfo_kib.get("SReclaimable", 0) * 1024),
+                format_gib(meminfo_kib.get("Shmem", 0) * 1024),
+                format_gib(cgroup_current),
+            )
+        except (KeyError, OSError, ValueError):
+            logger.exception(
+                "GB10 UMA MemAvailable lookup failed; falling back to CUDA MemFree"
+            )
+
+    if available_memory < requested_memory:
+        raise ValueError(
+            f"Free memory on device {init_snapshot.device_} "
+            f"({format_gib(available_memory)}/"
+'''
+    if source.count(old) != 1:
+        raise SystemExit("refusing UMA overlay: pinned request_memory block drifted")
+    source = source.replace(old, new, 1)
+
+output_path.write_text(source, encoding="utf-8")
+PY
+  rm -f -- "$temp_path"
+  chmod 0444 "$uma_utils_overlay"
+  echo "Prepared image-bound GB10 UMA memory overlay: $uma_utils_overlay"
 }
 
 prepare_node() {
@@ -449,13 +535,18 @@ start_node() {
   capture_logs
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   mkdir -p "$CACHE_HOST_PATH" "$LOG_HOST_PATH"
+  local uma_utils_overlay
+  prepare_uma_memory_overlay
   reclaim_uma_page_cache
 
   local iface hca
   iface="$(resolve_fabric_iface)"
   hca="$(resolve_hca "$iface")"
-  local headless=() extra_mounts=() extra_env=() nccl_tuning_env=()
+  local headless=() extra_mounts=() extra_env=() nccl_tuning_env=() memory_args=()
   [[ "$rank" == "0" ]] || headless=(--headless)
+  if [[ -n "$CONTAINER_MEMORY" && "$CONTAINER_MEMORY" != "0" ]]; then
+    memory_args=(--memory "$CONTAINER_MEMORY" --memory-swap "$CONTAINER_MEMORY")
+  fi
 
   if [[ "$Q40_ENABLED" == "1" ]]; then
     local receipt_path
@@ -479,6 +570,12 @@ start_node() {
       -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
       -e VLLM_NCCL_SO_PATH=/opt/sparkring/nccl/libnccl.so.2
     )
+  fi
+  if [[ "$VLLM_UMA_USE_MEM_AVAILABLE" == "1" ]]; then
+    extra_mounts+=(
+      -v "$uma_utils_overlay:/opt/venv/lib/python3.12/site-packages/vllm/v1/worker/utils.py:ro"
+    )
+    extra_env+=(-e VLLM_UMA_USE_MEM_AVAILABLE=1)
   fi
   [[ -z "$NCCL_ALGO" ]] || nccl_tuning_env+=(-e "NCCL_ALGO=$NCCL_ALGO")
   [[ -z "$NCCL_MIN_NCHANNELS" ]] || nccl_tuning_env+=(-e "NCCL_MIN_NCHANNELS=$NCCL_MIN_NCHANNELS")
@@ -550,7 +647,7 @@ start_node() {
   docker run --gpus all -d \
     --name "$CONTAINER_NAME" --restart no --init \
     --network host --ipc host --shm-size "$CONTAINER_SHM_SIZE" \
-    --memory "$CONTAINER_MEMORY" --memory-swap "$CONTAINER_MEMORY" \
+    "${memory_args[@]}" \
     --ulimit memlock=-1:-1 --ulimit "nofile=$CONTAINER_NOFILE:$CONTAINER_NOFILE" \
     --cap-add IPC_LOCK --device /dev/infiniband:/dev/infiniband \
     -v "$effective_model_mount_host_path:$effective_model_mount_container_path:ro" \

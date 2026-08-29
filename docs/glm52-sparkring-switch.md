@@ -94,7 +94,19 @@ health figure is `MemAvailable`. The explicit preflight reports both and uses
 each node immediately before vLLM starts. It uses a short-lived privileged
 container from the already-pinned local runtime image, with direct-root and
 passwordless-`sudo` fallbacks. Set it to `0` only if cache reclaim is handled
-externally.
+externally. The pinned vLLM worker still gates startup on CUDA `MemFree` after
+NCCL initialization. `VLLM_UMA_USE_MEM_AVAILABLE=1` therefore generates an
+image-bound, fail-closed overlay of that one worker module and uses Linux
+`MemAvailable` for the admission comparison. The server logs both figures.
+The overlay does not bypass the 0.85 threshold: it changes only which UMA
+availability figure is compared with it, and refuses to launch if the pinned
+source shape has drifted.
+
+The switched GB10 profile deliberately leaves `CONTAINER_MEMORY` empty. A
+Docker memory limit is not a separate CPU-only guard on this platform: Python
+RSS, NCCL buffers, page cache, model weights, and KV allocations share the UMA
+pool and are all charged to the container cgroup. The previous `112g` ceiling
+left almost no room above vLLM's 0.85 request and could cause a later cgroup OOM.
 
 If the runtime image is not present, explicitly run `build` first. That action
 checks out the pinned SparkRing source, pulls its immutable parent, builds the

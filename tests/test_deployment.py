@@ -374,6 +374,8 @@ def decode(logits):
             "KV_FP8_ROPE": "0",
             "VLLM_NVFP4_MLA_DYNAMIC_SCALE": "0",
             "UMA_DROP_CACHES_BEFORE_START": "1",
+            "VLLM_UMA_USE_MEM_AVAILABLE": "1",
+            "CONTAINER_MEMORY": "",
             "VLLM_USE_B12X_DCP_A2A": "1",
             "VLLM_B12X_MLA_CKV_GATHER": "1",
             "VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS": "1048576",
@@ -433,6 +435,10 @@ def decode(logits):
             'profile_declares_uma = os.environ["UMA_DROP_CACHES_BEFORE_START"] == "1"',
             'required_bytes = total_bytes * utilization',
             'reclaim_uma_page_cache',
+            'prepare_uma_memory_overlay',
+            'GB10 UMA startup admission',
+            'cgroup_current=%s GiB',
+            'VLLM_UMA_USE_MEM_AVAILABLE=1',
             'docker run --rm --privileged --pid host --entrypoint sh "$IMAGE"',
             "sudo -n tee /proc/sys/vm/drop_caches",
             'NCCL_CROSS_NIC=$NCCL_CROSS_NIC',
@@ -442,6 +448,7 @@ def decode(logits):
         start_node = node[node.index("start_node() {"):node.index("verify_node() {")]
         self.assertNotIn("preflight_node", start_node)
         self.assertIn("reclaim_uma_page_cache", start_node)
+        self.assertIn('memory_args=(--memory "$CONTAINER_MEMORY"', start_node)
         self.assertNotIn("NCCL_SKIP_TREE_CONNECT", node)
         self.assertNotIn("download_exl3_r7.py", builder)
         self.assertIn('if [[ "$PREPARE_IMAGE" == "1" ]]', launcher)
