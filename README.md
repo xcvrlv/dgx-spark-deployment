@@ -198,8 +198,8 @@ limitations, and the promotion gates.
 The target topology now has a separate launch path which preserves
 SparkRing's GLM-5.2 serving contract while replacing its direct-cycle
 SIRCL transport with NCCL over the switched, dual-rail RoCE fabric. It uses
-TP4/DCP4 `ag_rs`, fixed MTP4, 1M context, 16 sequences, dynamic NVFP4 DS-MLA,
-a 9.25 GB/rank KV slab, full-CKV gather, Q1-Q40 graphs, and image-bound
+TP4/DCP4 `ag_rs`, fixed MTP4, 1M context, 16 sequences, standard FP8 MLA KV,
+a 16.49 GB/rank KV slab, full-CKV gather, Q1-Q40 graphs, and image-bound
 exact-Q40 overlays.
 
 ```bash

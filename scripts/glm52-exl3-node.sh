@@ -24,7 +24,7 @@ required_env=(
   VLLM_NVFP4_MLA_DYNAMIC_SCALE VLLM_USE_B12X_DCP_A2A
   VLLM_B12X_MLA_CKV_GATHER VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS
   VLLM_SPARK_MAX_QUERY_ROWS VLLM_SPARK_MTP_MODE_ID VLLM_SPARK_MTP_TOKENS
-  VLLM_SPARK_SHARED_CAPTURE_STREAM
+  VLLM_SPARK_SHARED_CAPTURE_STREAM UMA_DROP_CACHES_BEFORE_START
   ENABLE_CHUNKED_PREFILL ENABLE_PREFIX_CACHING ASYNC_SCHEDULING
   DISABLE_CUSTOM_ALL_REDUCE COMPILATION_CONFIG VERIFY_CUDA_GRAPHS ENFORCE_EAGER
   CONTAINER_MEMORY CONTAINER_SHM_SIZE CONTAINER_NOFILE NCCL_IB_GID_INDEX
@@ -184,6 +184,25 @@ capture_logs() {
   fi
 }
 
+reclaim_uma_page_cache() {
+  [[ "$UMA_DROP_CACHES_BEFORE_START" == "1" ]] || return 0
+
+  echo "Reclaiming host page cache before vLLM's GB10 UMA memory admission check..."
+  sync
+  if [[ -w /proc/sys/vm/drop_caches ]]; then
+    printf '3\n' >/proc/sys/vm/drop_caches
+  elif docker run --rm --privileged --pid host --entrypoint sh "$IMAGE" \
+    -c 'sync; echo 3 > /proc/sys/vm/drop_caches'; then
+    :
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    printf '3\n' | sudo -n tee /proc/sys/vm/drop_caches >/dev/null
+  else
+    echo "UMA cache reclaim failed through Docker and sudo; run 'sudo sh -c \"sync; echo 3 > /proc/sys/vm/drop_caches\"' on this node or set UMA_DROP_CACHES_BEFORE_START=0" >&2
+    return 1
+  fi
+  awk '/^(MemFree|MemAvailable|Cached):/ { printf "%s %s %s\n", $1, $2, $3 }' /proc/meminfo
+}
+
 prepare_node() {
   command -v docker >/dev/null
   mkdir -p "$CACHE_HOST_PATH" "$LOG_HOST_PATH"
@@ -322,6 +341,7 @@ PY
 
   docker run --rm --gpus all --entrypoint python3 \
     "${cuda_compat_env[@]}" -e "GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION" \
+    -e "UMA_DROP_CACHES_BEFORE_START=$UMA_DROP_CACHES_BEFORE_START" \
     "$IMAGE" -c '
 import os
 import torch
@@ -329,12 +349,25 @@ import torch
 free_bytes, total_bytes = torch.cuda.mem_get_info()
 utilization = float(os.environ["GPU_MEMORY_UTILIZATION"])
 required_bytes = total_bytes * utilization
+properties = torch.cuda.get_device_properties(0)
+profile_declares_uma = os.environ["UMA_DROP_CACHES_BEFORE_START"] == "1"
+integrated = profile_declares_uma or bool(getattr(properties, "integrated", False))
+mem_available_bytes = 0
+with open("/proc/meminfo", encoding="utf-8") as meminfo:
+    for line in meminfo:
+        if line.startswith("MemAvailable:"):
+            mem_available_bytes = int(line.split()[1]) * 1024
+            break
+available_bytes = mem_available_bytes if integrated and mem_available_bytes else free_bytes
+available_source = "MemAvailable" if integrated and mem_available_bytes else "CUDA MemFree"
 gib = 1024 ** 3
 print(
-    f"GPU memory health: free={free_bytes / gib:.2f} GiB "
-    f"total={total_bytes / gib:.2f} GiB required={required_bytes / gib:.2f} GiB"
+    f"GPU memory health: cuda_free={free_bytes / gib:.2f} GiB "
+    f"mem_available={mem_available_bytes / gib:.2f} GiB "
+    f"required={required_bytes / gib:.2f} GiB integrated={integrated} "
+    f"decision_source={available_source}"
 )
-if free_bytes < required_bytes:
+if available_bytes < required_bytes:
     raise SystemExit(
         "GPU memory health failed: stop competing GPU workloads or repair/reboot the node"
     )
@@ -416,6 +449,7 @@ start_node() {
   capture_logs
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   mkdir -p "$CACHE_HOST_PATH" "$LOG_HOST_PATH"
+  reclaim_uma_page_cache
 
   local iface hca
   iface="$(resolve_fabric_iface)"

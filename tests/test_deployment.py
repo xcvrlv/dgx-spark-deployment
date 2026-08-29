@@ -369,10 +369,11 @@ def decode(logits):
             "MAX_NUM_SEQS": "16",
             "MAX_NUM_BATCHED_TOKENS": "4096",
             "BLOCK_SIZE": "64",
-            "KV_CACHE_DTYPE": "nvfp4_ds_mla",
-            "KV_CACHE_MEMORY_BYTES": "9250000000",
-            "KV_FP8_ROPE": "1",
-            "VLLM_NVFP4_MLA_DYNAMIC_SCALE": "1",
+            "KV_CACHE_DTYPE": "fp8",
+            "KV_CACHE_MEMORY_BYTES": "16489130435",
+            "KV_FP8_ROPE": "0",
+            "VLLM_NVFP4_MLA_DYNAMIC_SCALE": "0",
+            "UMA_DROP_CACHES_BEFORE_START": "1",
             "VLLM_USE_B12X_DCP_A2A": "1",
             "VLLM_B12X_MLA_CKV_GATHER": "1",
             "VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS": "1048576",
@@ -426,14 +427,21 @@ def decode(logits):
             "SPARK_Q40_EXACT_STATE_CHECKPOINT=$Q40_CHECKPOINT_REVISION",
             'cuda_compat_env=(\n      -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1',
             'docker run --rm --gpus all "${cuda_compat_env[@]}" "$IMAGE" /bin/true',
-            'GPU memory health: free={free_bytes / gib:.2f} GiB',
+            'GPU memory health: cuda_free={free_bytes / gib:.2f} GiB',
+            'decision_source={available_source}',
+            'mem_available_bytes if integrated',
+            'profile_declares_uma = os.environ["UMA_DROP_CACHES_BEFORE_START"] == "1"',
             'required_bytes = total_bytes * utilization',
+            'reclaim_uma_page_cache',
+            'docker run --rm --privileged --pid host --entrypoint sh "$IMAGE"',
+            "sudo -n tee /proc/sys/vm/drop_caches",
             'NCCL_CROSS_NIC=$NCCL_CROSS_NIC',
         ):
             self.assertIn(fragment, node)
         self.assertNotIn("VLLM_SPARK_TP4_MODE=custom", node)
         start_node = node[node.index("start_node() {"):node.index("verify_node() {")]
         self.assertNotIn("preflight_node", start_node)
+        self.assertIn("reclaim_uma_page_cache", start_node)
         self.assertNotIn("NCCL_SKIP_TREE_CONNECT", node)
         self.assertNotIn("download_exl3_r7.py", builder)
         self.assertIn('if [[ "$PREPARE_IMAGE" == "1" ]]', launcher)

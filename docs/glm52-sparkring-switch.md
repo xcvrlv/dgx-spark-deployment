@@ -24,7 +24,7 @@ quickstart while deliberately relaxing checkpoint identity:
 | Parallelism | TP4, DCP4, `ag_rs`, KV interleave 1 |
 | Speculation | Fixed MTP4, draft TP4, B12X target and draft MoE |
 | Context and concurrency | 1,048,576 tokens, 16 sequences, 4,096 batched tokens |
-| KV cache | `nvfp4_ds_mla`, dynamic per-token scale, FP8 RoPE, 9,250,000,000 bytes/rank |
+| KV cache | Standard `fp8`, 16,489,130,435 bytes/rank (the same token capacity as the former 9.25 GB NVFP4-DS slab) |
 | KV blocks | 64 tokens |
 | Prefill | EXL3 capacity 4,096 and bounded full-CKV gather to 1,048,576 tokens |
 | Execution | `FULL_AND_PIECEWISE`, capture sizes Q1 through Q40 |
@@ -34,7 +34,7 @@ quickstart while deliberately relaxing checkpoint identity:
 The builder uses SparkRing's own pinned R7 build rather than attempting to
 approximate its runtime with this repository's older local-inference r34
 Dockerfile. This is necessary: the older tree does not contain the complete
-dynamic-NVFP4, full-CKV-gather, shared-capture, and exact-Q40 contracts.
+full-CKV-gather, shared-capture, and exact-Q40 contracts.
 
 ## The deliberate topology difference
 
@@ -86,7 +86,15 @@ when configuration or hardware state has changed; repeated starts go directly
 to teardown and worker-first launch. The default GPU utilization remains 0.85;
 each node must expose at least about 104 GiB free before launch. A lower reading
 is a node-health or competing-workload condition and is not masked by reducing
-the serving envelope.
+the serving envelope. DGX Spark is a unified-memory system: CUDA reports Linux
+`MemFree`, which excludes reclaimable model-file page cache, while the useful
+health figure is `MemAvailable`. The explicit preflight reports both and uses
+`MemAvailable` on integrated GPUs. At start, the default
+`UMA_DROP_CACHES_BEFORE_START=1` performs a synchronized page-cache reclaim on
+each node immediately before vLLM starts. It uses a short-lived privileged
+container from the already-pinned local runtime image, with direct-root and
+passwordless-`sudo` fallbacks. Set it to `0` only if cache reclaim is handled
+externally.
 
 If the runtime image is not present, explicitly run `build` first. That action
 checks out the pinned SparkRing source, pulls its immutable parent, builds the
@@ -138,7 +146,7 @@ different model for:
 4. EXL3 mixed-trellis target layers and online-quantization ignore rules;
 5. MTP layer count, draft quantization, and the fixed speculative depth;
 6. Q1-Q40 graph shapes and exact-Q40 target/draft state assumptions;
-7. dynamic NVFP4 KV record size, cache capacity, and long-context correctness.
+7. standard FP8 KV record size, cache capacity, and long-context correctness.
 
 The exact-Q40 overlay remains image-bound and its runtime gates are enforced.
 If a model's layer geometry does not satisfy those gates, disable Q40 for an
@@ -155,7 +163,8 @@ model slot and is not presented as a model revision or content hash.
   library preloaded;
 - config/index readability and every referenced local shard pass on all ranks;
 - the GPU memory health probe reports at least the 0.85 envelope (about 104 GiB)
-  free on every rank, with no competing GPU workload;
+  available on every rank; on GB10 this uses Linux `MemAvailable` so reclaimable
+  page cache is not misclassified as a competing GPU workload;
 - both switch rails pass RoCE validation without retries, fallback to sockets,
   or asymmetric HCA selection;
 - all four exact-Q40 attestations are fresh and consistent;
