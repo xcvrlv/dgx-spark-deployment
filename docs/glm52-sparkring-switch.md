@@ -108,15 +108,6 @@ RSS, NCCL buffers, page cache, model weights, and KV allocations share the UMA
 pool and are all charged to the container cgroup. The previous `112g` ceiling
 left almost no room above vLLM's 0.85 request and could cause a later cgroup OOM.
 
-The pinned vLLM CLI normally selects `spawn`, which imports the heavy runtime
-independently in the API server, engine core, and worker. This profile selects
-its purpose-built CUDA-clean `forkserver` path instead; the engine and worker
-stacks are preloaded before CUDA initialization so clean pages are shared by
-copy-on-write. ARM CPU libraries are capped at four threads per process
-(`OMP`, OpenBLAS, MKL, NumExpr, and Rayon), tokenizer parallelism is disabled,
-and glibc arenas are capped at two. This reduces duplicated RSS and thread-pool
-pressure without changing the 0.85 GPU envelope or the fixed FP8 KV slab.
-
 If the runtime image is not present, explicitly run `build` first. That action
 checks out the pinned SparkRing source, pulls its immutable parent, builds the
 runtime and Q40 overlays on rank 0, and distributes them. Audit and set
