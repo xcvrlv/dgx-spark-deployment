@@ -163,11 +163,13 @@ different model for:
 6. Q1-Q40 graph shapes and exact-Q40 target/draft state assumptions;
 7. standard FP8 KV record size, cache capacity, and long-context correctness.
 
-The exact-Q40 overlay remains image-bound and its runtime gates are enforced.
-If a model's layer geometry does not satisfy those gates, disable Q40 for an
-initial bring-up or rebuild/adjust the overlay instead of weakening its runtime
-attestation. Upstream requires the receipt's checkpoint field to be 40
-lowercase hexadecimal characters. The local-model profile therefore uses a
+The exact-Q40 overlay is disabled by default because it is checkpoint-layout
+specific. Enable `Q40_ENABLED=1` only after the selected model passes its
+runtime gates. A model whose MTP draft inventory is mixed-trellis rather than
+exactly one uniform EXL3 layer can still use the TP4/DCP4, MTP4, and FP8-KV
+serving path with Q40 disabled. Rebuild or adjust the overlay for that model
+instead of weakening its runtime attestation. Upstream requires the receipt's
+checkpoint field to be 40 lowercase hexadecimal characters. The local-model profile therefore uses a
 stable synthetic `Q40_CHECKPOINT_REVISION`; it identifies the operator-managed
 model slot and is not presented as a model revision or content hash.
 

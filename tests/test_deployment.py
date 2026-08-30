@@ -383,7 +383,7 @@ def decode(logits):
             "VLLM_EXL3_PREFILL_CAPACITY": "4096",
             "VLLM_SPARK_MAX_QUERY_ROWS": "40",
             "MAX_CUDAGRAPH_CAPTURE_SIZE": "40",
-            "Q40_ENABLED": "1",
+            "Q40_ENABLED": "0",
             "NETWORK_TOPOLOGY": "switch-star-dual-rail",
             "NCCL_CROSS_NIC": "1",
         }
