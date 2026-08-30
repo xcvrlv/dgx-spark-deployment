@@ -3,9 +3,8 @@
 This is a small, independent SparkRun recipe for the already-built
 `spark-vllm-glm52-exl3:sparkring-switch-v1` image and the existing local model
 cache. It does not build or pull an image, download a model, create a fixed
-oversized KV cache, or capture prefill graphs. It enables the
-checkpoint-qualified MTP3 path for up to eight sequences; prefill and mixed
-batches stay eager.
+oversized KV cache, or capture prefill graphs. It enables an experimental MTP4
+path for up to eight sequences; prefill and mixed batches stay eager.
 
 Run the commands from a Spark that can SSH to all four nodes:
 
@@ -47,8 +46,8 @@ communication buffers, Python processes, and page cache can consume additional
 memory. This recipe fixes the per-node KV pool at 18,000,000,000 bytes. Online
 K6 weight savings are deliberately left as additional UMA headroom during the
 first correctness and memory A/B instead of being immediately reassigned to
-KV. MTP3 verifies four tokens per sequence, so
-`FULL_DECODE_ONLY` captures `[4,8,12,16,20,24,28,32]` for one through eight
+KV. MTP4 verifies five tokens per sequence, so
+`FULL_DECODE_ONLY` captures `[5,10,15,20,25,30,35,40]` for one through eight
 uniform speculative-decode requests while leaving prefill and mixed batches
 eager. CUDA-graph memory estimation is enabled so KV sizing accounts for graph
 headroom during profiling; the explicit KV pool prevents a conservative graph
@@ -58,12 +57,17 @@ capacity, not preallocated memory or a container memory limit.
 The 4096-token prefill batch is paired with
 `VLLM_EXL3_PREFILL_CAPACITY=4096`; increasing only the scheduler limit would
 leave the EXL3 scratch path sized for the earlier 1024-token baseline. The
+bulk-prefill Trellis planner starts with a conservative block size of 32 and a
+128-row chunk. MTP4's five rows per request remain in the small-M Trellis path
+through eight sequences by pinning its upper threshold to 48; this prevents
+the 35- and 40-row decode graphs from entering the bulk-prefill planner during
+capture. Qualify prefill block sizes 16 and 8 only as separate A/B runs. The
 recipe also pins the proven SM121/B12X controls: V2 model runner, B12X sparse
 indexer, MTP verification through the sparse decode path, CKV gather disabled,
 DCP global top-k with a sharded draft, a 256 MiB sparse-indexer logits bound,
-four NCCL channels, and MTP acceptance instrumentation. Async scheduling stays
-enabled because this exact V2 MTP3 path has already launched successfully and
-decode-aware prefill is not enabled.
+four NCCL channels, and MTP acceptance instrumentation. Async scheduling is
+disabled while isolating the repeated worker-exit failure seen during
+long-context speculative decode; decode-aware prefill is not enabled.
 
 The explicit `index_topk_pattern` mirrors the checkpoint's 78-entry
 `indexer_types` topology. It is retained because this SparkRing/B12X branch
@@ -121,8 +125,8 @@ confirm it has no live vLLM process (`docker top <container>`), then remove
 only that named stale container with `docker rm -f <container>`. Do this on
 each affected node. Do not use a blanket Docker prune on the DGX Spark.
 
-Confirm the logs report MTP with three speculative tokens, `FULL_DECODE_ONLY`,
-capture sizes through 32, and a 14,000,000,000-byte KV pool. Then record KV
+Confirm the logs report MTP with four speculative tokens, `FULL_DECODE_ONLY`,
+capture sizes through 40, and an 18,000,000,000-byte KV pool. Then record KV
 capacity, drafted-token acceptance,
 and generation throughput at concurrency 1 and 8. Capture `sparkrun logs
 glm53-exl3-4x-safe`, `sparkrun status`, host `dmesg`, and `memory.events` on any
