@@ -23,7 +23,7 @@ def read_env(path: Path) -> dict[str, str]:
 
 class DeploymentStaticTests(unittest.TestCase):
     def test_text_sources_have_linux_line_endings_and_no_trailing_space(self) -> None:
-        source_suffixes = {".sh", ".py", ".env", ".md"}
+        source_suffixes = {".sh", ".py", ".env", ".md", ".yaml", ".yml"}
         for path in ROOT.rglob("*"):
             if not path.is_file() or path.suffix not in source_suffixes:
                 continue
@@ -460,6 +460,24 @@ def decode(logits):
         self.assertIn('"FABRIC_IFACE=${FABRIC_IFACE:-}" "FABRIC_IPS=$fabric_ips"', launcher)
         self.assertIn("PREPARE_IMAGE=0: using the existing runtime image and local model files", launcher)
         self.assertIn("glm-5.2-exl3-sparkring-switch.env", wrapper)
+
+    def test_sparkrun_glm53_exl3_recipe_keeps_hf_blobs_and_graphs_out_of_bringup(self) -> None:
+        recipe = (ROOT / "sparkrun-glm53-exl3/recipes/glm53-exl3-4x-safe.yaml").read_text()
+        registry = (ROOT / "sparkrun-glm53-exl3/.sparkrun/registry.yaml").read_text()
+        self.assertIn("name: juho-glm53-exl3", registry)
+        self.assertIn("runtime: vllm-distributed", recipe)
+        self.assertIn("container: spark-vllm-glm52-exl3:sparkring-switch-v1", recipe)
+        self.assertIn("model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw", recipe)
+        self.assertIn('gpu_memory_utilization: 0.80', recipe)
+        self.assertIn('max_model_len: 32768', recipe)
+        self.assertIn('max_num_seqs: 1', recipe)
+        self.assertIn('revision="$(cat "$model_root/refs/main")"', recipe)
+        self.assertIn('model_path="$model_root/snapshots/$revision"', recipe)
+        self.assertIn("--enforce-eager", recipe)
+        self.assertIn("VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: \"0\"", recipe)
+        self.assertNotIn("--kv-cache-memory-bytes", recipe)
+        self.assertNotIn("--speculative-config", recipe)
+        self.assertNotIn("memory_limit:", recipe)
 
 
 if __name__ == "__main__":

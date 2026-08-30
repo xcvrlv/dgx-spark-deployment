@@ -1,0 +1,4 @@
+registries:
+  - name: juho-glm53-exl3
+    description: Conservative GLM-5.3 EXL3 bring-up recipe for four DGX Sparks.
+    recipes: recipes
