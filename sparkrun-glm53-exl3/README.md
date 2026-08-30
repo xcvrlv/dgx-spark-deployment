@@ -54,6 +54,42 @@ eager. CUDA-graph memory estimation is enabled so KV sizing accounts for graph
 headroom. The 32 GiB `/dev/shm` setting is capacity, not preallocated memory or
 a container memory limit.
 
+The 4096-token prefill batch is paired with
+`VLLM_EXL3_PREFILL_CAPACITY=4096`; increasing only the scheduler limit would
+leave the EXL3 scratch path sized for the earlier 1024-token baseline. The
+recipe also pins the proven SM121/B12X controls: V2 model runner, B12X sparse
+indexer, MTP verification through the sparse decode path, CKV gather disabled,
+DCP global top-k with a sharded draft, a 256 MiB sparse-indexer logits bound,
+four NCCL channels, and MTP acceptance instrumentation. Async scheduling stays
+enabled because this exact V2 MTP3 path has already launched successfully and
+decode-aware prefill is not enabled.
+
+The GLM-5.2 `index_topk_pattern` override is intentionally absent. This GLM-5.3
+checkpoint already carries the complete 78-entry `indexer_types` topology with
+`index_topk_freq=4` and `index_skip_topk_offset=3`; replacing it with a copied
+GLM-5.2 string would be a checkpoint-specific override. Fixed KV bytes,
+adaptive MTP depths, long-context permission overrides, decode-aware prefill,
+and its associated scheduler budgets also remain absent.
+
+Do not copy the v1 `mods/drop-caches` field into this native v2 recipe: the
+presence of `mods` selects SparkRun's legacy recipe path. To test whether page
+cache is what prevents 0.85 admission, use the supported cluster operation
+immediately before one controlled launch:
+
+```bash
+# One-time setup if SparkRun has not saved the required sudo permission:
+sparkrun setup clear-cache --cluster <cluster-name> --save-sudo
+
+# Controlled A/B launch:
+sparkrun setup clear-cache --cluster <cluster-name>
+```
+
+Then compare vLLM's `Free memory on device (.../121.63 GiB) on startup` line.
+The 0.85 gate needs at least 103.38 GiB free. If it remains near the observed
+101.49 GiB after the cache clear, the missing memory is initialization/runtime
+state rather than reclaimable page cache, and 0.83 is the correct automatic-KV
+ceiling unless the runtime accounting changes.
+
 The recipe intentionally does not set `executor_config.memory_limit`, so
 SparkRun does not add Docker's `--memory` cgroup cap. That cap is not a useful
 proxy for the dynamically shared GB10 CPU/GPU memory pool and can turn a
