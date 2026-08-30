@@ -6,7 +6,7 @@
 # symlinks then remain valid inside the container.
 recipe_version: "2"
 name: glm53-exl3-4x-safe
-description: GLM-5.3 EXL3 on four Sparks, with single-request decode graphs.
+description: GLM-5.3 EXL3 MTP3 on four Sparks, with decode-only graphs.
 model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw
 runtime: vllm-distributed
 container: spark-vllm-glm52-exl3:sparkring-switch-v1
@@ -25,13 +25,13 @@ defaults:
   # Keep a small admission margin rather than failing vLLM's pre-load gate.
   gpu_memory_utilization: 0.83
   max_model_len: 32768
-  max_num_seqs: 1
+  max_num_seqs: 8
   max_num_batched_tokens: 1024
   served_model_name: glm-5.3-exl3-tr3-3.42bpw
 
-# These retain the image's required GB10/EXL3 wiring. MTP, the 1M context
-# target, and the fixed 16.5 GB KV cache remain absent. CUDA graph capture is
-# restricted to the single-request decode shape below.
+# These retain the image's required GB10/EXL3 wiring. The 1M context target and
+# fixed 16.5 GB KV cache remain absent. MTP3 and CUDA graphs are restricted to
+# the eight uniform speculative-decode shapes below.
 env:
   LD_PRELOAD: /usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
   VLLM_NCCL_SO_PATH: /opt/sparkring/nccl/libnccl.so.2
@@ -71,7 +71,8 @@ executor_config:
   gpu_access_mode: gpus
   ipc: host
   network: host
-  shm_size: 16gb
+  # Capacity only; Docker does not preallocate 32 GiB of shared memory.
+  shm_size: 32gb
   ulimit:
     - memlock=-1:-1
     - nofile=1048576:1048576
@@ -108,4 +109,5 @@ command: |
     --disable-custom-all-reduce \
     --enable-chunked-prefill \
     --enable-prefix-caching \
-    --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'
+    --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":3,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X_MLA_SPARSE\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
+    --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'
