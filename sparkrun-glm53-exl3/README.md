@@ -3,7 +3,8 @@
 This is a small, independent SparkRun recipe for the already-built
 `spark-vllm-glm52-exl3:sparkring-switch-v1` image and the existing local model
 cache. It does not build or pull an image, download a model, create a fixed
-large KV cache, enable MTP, or capture CUDA graphs.
+large KV cache, or enable MTP. It captures only the batch-size-one uniform
+decode CUDA graph; prefill and mixed batches stay eager.
 
 Run the commands from a Spark that can SSH to all four nodes:
 
@@ -35,15 +36,16 @@ path is deliberately the Hugging Face cache root: the command reads `refs/main`
 and the complete root is mounted, so snapshot-to-blob symlinks work without
 another copy of the weights.
 
-The 0.80 utilization leaves roughly 26 GiB of the 128 GiB unified-memory pool
-outside vLLM's target allocation. `gpu_memory_utilization` is an allocation
+The 0.85 utilization leaves roughly 19 GiB of the 128 GiB unified-memory pool
+outside vLLM's target allocation. Compared with the proven 0.80 launch, this
+adds about 6.1 GiB to vLLM's per-node allocation target. `gpu_memory_utilization` is an allocation
 budget, not a complete host-RAM limit: model loading, graph capture,
 communication buffers, Python processes, and page cache can consume additional
-memory. The previous recipe had only about 19 GiB outside its 0.85 target while
-also reserving a 16.5 GB KV slab and capturing 40 graph sizes. Its shared-memory
-broadcast waits started after that phase, which is consistent with an EngineCore
-worker being starved or killed; Docker's `OOMKilled=false` does not rule out a
-child process or host-level pressure event.
+memory. Unlike the previous 0.85 recipe, this one does not reserve a fixed
+16.5 GB KV slab or capture Q1–Q40. `FULL_DECODE_ONLY` with capture size `[1]`
+covers the current single-request ordinary decode path while leaving prefill
+and mixed batches eager. CUDA-graph memory estimation is enabled so KV sizing
+accounts for graph headroom.
 
 The recipe intentionally does not set `executor_config.memory_limit`, so
 SparkRun does not add Docker's `--memory` cgroup cap. That cap is not a useful
@@ -68,11 +70,12 @@ confirm it has no live vLLM process (`docker top <container>`), then remove
 only that named stale container with `docker rm -f <container>`. Do this on
 each affected node. Do not use a blanket Docker prune on the DGX Spark.
 
-Keep this recipe eager until it completes a cold start and sustained requests.
-Capture `sparkrun logs glm53-exl3-4x-safe`, `sparkrun status`, host `dmesg`, and
-`memory.events` on any failed node before changing one dimension at a time:
-context/KV capacity first, then CUDA graphs, then MTP. Do not restore the old
-1M context, 16.5 GB fixed KV cache, and Q1–Q40 graph capture in one step.
+Keep MTP disabled until this decode-graph profile completes a cold start and
+sustained requests. Confirm the logs report `FULL_DECODE_ONLY` and capture size
+1, then record KV capacity and generation throughput before adding MTP. Capture
+`sparkrun logs glm53-exl3-4x-safe`, `sparkrun status`, host `dmesg`, and
+`memory.events` on any failed node. Do not restore the old 1M context, 16.5 GB
+fixed KV cache, and Q1–Q40 graph capture.
 
 For optional name-based registration, initialize and commit this folder as its
 own Git repository, then run `sparkrun registry add <its-git-url>`. The local
