@@ -55,9 +55,6 @@ env:
   VLLM_USE_AOT_COMPILE: "1"
   VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
   VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "0"
-  # This may be inherited from a cluster-wide SparkRun environment. GLM-5.3
-  # has neither sliding-window nor Mamba KV groups, so vLLM rejects it.
-  VLLM_PREFIX_CACHE_RETENTION_INTERVAL: ""
 
 executor: docker
 executor_config:
@@ -81,6 +78,9 @@ executor_config:
 
 command: |
   set -euo pipefail
+  # This may be inherited from a cluster-wide SparkRun environment. An empty
+  # value is not sufficient because vLLM parses it with int(); remove it.
+  unset VLLM_PREFIX_CACHE_RETENTION_INTERVAL
   model_root="{model}"
   revision="$(cat "$model_root/refs/main")"
   model_path="$model_root/snapshots/$revision"
