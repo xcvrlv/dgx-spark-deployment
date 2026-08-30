@@ -21,17 +21,23 @@ defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 4
-  # The initialized GB10 worker reports 101.76/121.63 GiB free (0.8366).
-  # Keep a small admission margin rather than failing vLLM's pre-load gate.
-  gpu_memory_utilization: 0.83
-  max_model_len: 32768
+  # Keep this as a startup admission guard even though fixed KV bytes control
+  # the cache allocation. The clean-start worker measured 112.90/121.63 GiB
+  # free and a 0.89 target of 108.25 GiB.
+  gpu_memory_utilization: 0.89
+  # vLLM measured 14,191,165,010 bytes as fitting inside that 0.89 envelope.
+  # Round down to retain about 191 MB inside the envelope and roughly 4.8 GiB
+  # outside it for the GB10 unified-memory host. This is per Spark/GPU.
+  kv_cache_memory_bytes: 18000000000
+  max_model_len: 1048576
   max_num_seqs: 8
   max_num_batched_tokens: 4096
   served_model_name: glm-5.3-exl3-tr3-3.42bpw
 
 # These retain the image's required GB10/EXL3 wiring. The 1M context target and
-# fixed 16.5 GB KV cache remain absent. MTP3 and CUDA graphs are restricted to
-# the eight uniform speculative-decode shapes below.
+# old 16.5 GB KV setting remain absent; the measured 14.0 GB fixed pool is used
+# instead. MTP3 and CUDA graphs are restricted to the eight uniform
+# speculative-decode shapes below.
 env:
   LD_PRELOAD: /usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
   VLLM_NCCL_SO_PATH: /opt/sparkring/nccl/libnccl.so.2
@@ -109,6 +115,7 @@ command: |
     --tensor-parallel-size {tensor_parallel} \
     --distributed-executor-backend mp \
     --gpu-memory-utilization {gpu_memory_utilization} \
+    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
     --max-model-len {max_model_len} \
     --max-num-seqs {max_num_seqs} \
     --max-num-batched-tokens {max_num_batched_tokens} \
@@ -129,4 +136,4 @@ command: |
     --tool-call-parser glm47 \
     --enable-auto-tool-choice \
     --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":3,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X_MLA_SPARSE\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
-    --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'
+    --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,3,4,5,6,7,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'

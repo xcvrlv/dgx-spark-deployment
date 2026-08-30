@@ -468,7 +468,8 @@ def decode(logits):
         self.assertIn("runtime: vllm-distributed", recipe)
         self.assertIn("container: spark-vllm-glm52-exl3:sparkring-switch-v1", recipe)
         self.assertIn("model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw", recipe)
-        self.assertIn('gpu_memory_utilization: 0.83', recipe)
+        self.assertIn('gpu_memory_utilization: 0.89', recipe)
+        self.assertIn('kv_cache_memory_bytes: 14000000000', recipe)
         self.assertIn('max_model_len: 32768', recipe)
         self.assertIn('max_num_seqs: 8', recipe)
         self.assertIn('max_num_batched_tokens: 4096', recipe)
@@ -509,7 +510,7 @@ def decode(logits):
         self.assertNotIn("mods:", recipe)
         self.assertIn("auto_remove: true", recipe)
         self.assertNotIn("restart_policy:", recipe)
-        self.assertNotIn("--kv-cache-memory-bytes", recipe)
+        self.assertIn("--kv-cache-memory-bytes {kv_cache_memory_bytes}", recipe)
         self.assertIn("--speculative-config", recipe)
         self.assertNotIn("memory_limit:", recipe)
 
