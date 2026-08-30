@@ -44,12 +44,10 @@ same startup reading to about 112.9 GiB. The current 0.89 startup target is
 `gpu_memory_utilization` is an allocation budget, not a complete host-RAM
 limit: model loading, graph capture,
 communication buffers, Python processes, and page cache can consume additional
-memory. This recipe fixes the per-node KV pool at 14,000,000,000 bytes. That is
-rounded down from vLLM's measured 14,191,165,010-byte recommendation for
-fitting inside the 0.89 envelope. The alternative 19,186,056,704-byte message
-means consuming essentially all memory free in that one startup snapshot; even
-19,000,000,000 bytes would leave only about 186 MB relative to it and is not a
-safe GB10 UMA margin. MTP3 verifies four tokens per sequence, so
+memory. This recipe fixes the per-node KV pool at 18,000,000,000 bytes. Online
+K6 weight savings are deliberately left as additional UMA headroom during the
+first correctness and memory A/B instead of being immediately reassigned to
+KV. MTP3 verifies four tokens per sequence, so
 `FULL_DECODE_ONLY` captures `[4,8,12,16,20,24,28,32]` for one through eight
 uniform speculative-decode requests while leaving prefill and mixed batches
 eager. CUDA-graph memory estimation is enabled so KV sizing accounts for graph
@@ -67,12 +65,19 @@ four NCCL channels, and MTP acceptance instrumentation. Async scheduling stays
 enabled because this exact V2 MTP3 path has already launched successfully and
 decode-aware prefill is not enabled.
 
-The GLM-5.2 `index_topk_pattern` override is intentionally absent. This GLM-5.3
-checkpoint already carries the complete 78-entry `indexer_types` topology with
-`index_topk_freq=4` and `index_skip_topk_offset=3`; replacing it with a copied
-GLM-5.2 string would be a checkpoint-specific override. Adaptive MTP depths,
-long-context permission overrides, decode-aware prefill, and its associated
-scheduler budgets also remain absent.
+The explicit `index_topk_pattern` mirrors the checkpoint's 78-entry
+`indexer_types` topology. It is retained because this SparkRing/B12X branch
+needs the compact schedule metadata for coherent sparse-index reuse even though
+the upstream GLM-5.3 config also carries the expanded list.
+
+Online Trellis K6 is enabled for the checkpoint's eligible BF16 linear/shared
+expert weights through `ONLINE_QUANT=exl3-b6` and the same quantization ignore
+list used by the earlier SparkRing launcher. The mixed K3/K4 routed experts are
+loaded directly from the checkpoint and are not re-encoded. A cold launch can
+spend more than 15 minutes per rank creating the K6 artifacts; subsequent
+launches reuse `.exl3-online-k6` inside the identity-mounted Hugging Face model
+cache. Do not delete that directory between benchmarks. Adaptive MTP depths,
+decode-aware prefill, and its associated scheduler budgets remain absent.
 
 Do not copy the v1 `mods/drop-caches` field into this native v2 recipe: the
 presence of `mods` selects SparkRun's legacy recipe path. To test whether page
@@ -91,7 +96,7 @@ Then compare vLLM's `Free memory on device (.../121.63 GiB) on startup` line.
 The 0.89 gate needs about 108.25 GiB free. The measured increase from 101.49 to
 about 112.9 GiB confirms that reclaimable cache—not the sparse-indexer
 workspace—caused the earlier ceiling. Repeat the cache clear before cold
-launches; the fixed 14 GB KV pool assumes that clean-start margin.
+launches; the fixed 18 GB KV pool assumes that clean-start margin.
 
 The recipe intentionally does not set `executor_config.memory_limit`, so
 SparkRun does not add Docker's `--memory` cgroup cap. That cap is not a useful
@@ -121,8 +126,7 @@ capture sizes through 32, and a 14,000,000,000-byte KV pool. Then record KV
 capacity, drafted-token acceptance,
 and generation throughput at concurrency 1 and 8. Capture `sparkrun logs
 glm53-exl3-4x-safe`, `sparkrun status`, host `dmesg`, and `memory.events` on any
-failed node. Do not restore the old 1M context, 16.5 GB KV cache, and Q1–Q40
-graph capture.
+failed node. Do not restore the old Q1–Q40 graph capture.
 
 For optional name-based registration, initialize and commit this folder as its
 own Git repository, then run `sparkrun registry add <its-git-url>`. The local
