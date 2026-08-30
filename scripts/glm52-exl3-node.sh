@@ -461,6 +461,16 @@ start_node() {
     memory_args=(--memory "$CONTAINER_MEMORY" --memory-swap "$CONTAINER_MEMORY")
   fi
 
+  # The pinned SparkRing runtime is linked against CUDA compatibility symbols
+  # that are newer than the host driver's default libcuda export. This is a
+  # property of the runtime image, not of the optional exact-Q40 overlay.
+  if [[ "$RUNTIME_CONTRACT" == "sparkring-r7-switch-q40" ]]; then
+    extra_env+=(
+      -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
+      -e VLLM_NCCL_SO_PATH=/opt/sparkring/nccl/libnccl.so.2
+    )
+  fi
+
   if [[ "$Q40_ENABLED" == "1" ]]; then
     local receipt_path
     receipt_path="$CACHE_HOST_PATH/jit/q40-exact-state-serving-v1-rank${rank}.json"
@@ -480,8 +490,6 @@ start_node() {
       -e "SPARK_Q40_EXACT_STATE_EXPECTED_EXL3_SHA256=$Q40_EXL3_SHA256"
       -e "SPARK_Q40_EXACT_STATE_IMAGE_ID=$(docker image inspect "$IMAGE" --format '{{.Id}}')"
       -e "SPARK_Q40_EXACT_STATE_CHECKPOINT=$Q40_CHECKPOINT_REVISION"
-      -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
-      -e VLLM_NCCL_SO_PATH=/opt/sparkring/nccl/libnccl.so.2
     )
   fi
   [[ -z "$NCCL_ALGO" ]] || nccl_tuning_env+=(-e "NCCL_ALGO=$NCCL_ALGO")

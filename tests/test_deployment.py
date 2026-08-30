@@ -430,6 +430,8 @@ def decode(logits):
             "SPARK_Q40_EXACT_STATE_CHECKPOINT=$Q40_CHECKPOINT_REVISION",
             'cuda_compat_env=(\n      -e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1',
             'docker run --rm --gpus all "${cuda_compat_env[@]}" "$IMAGE" /bin/true',
+            'property of the runtime image, not of the optional exact-Q40 overlay',
+            '-e LD_PRELOAD=/usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2',
             'GPU memory health: cuda_free={free_bytes / gib:.2f} GiB',
             'decision_source={available_source}',
             'mem_available_bytes if integrated',
