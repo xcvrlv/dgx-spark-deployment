@@ -64,9 +64,10 @@ executor_config:
   # Deliberately no memory_limit. On GB10, a Docker cgroup ceiling is not a
   # reliable accounting boundary for the shared CPU/GPU UMA pool; leave
   # lifecycle and host protection to SparkRun and the configured host policy.
-  # Keep exited containers and their log/inspect state for incident analysis.
-  auto_remove: false
-  restart_policy: "no"
+  # Remove the executor once SparkRun stops it. A failed `docker exec` can
+  # otherwise leave its sleep-infinity executor holding model page cache and
+  # /dev/shm allocations in the container cgroup.
+  auto_remove: true
   entrypoint: ""
   gpu_access_mode: gpus
   ipc: host

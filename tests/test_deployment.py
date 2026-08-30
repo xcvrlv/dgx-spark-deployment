@@ -477,6 +477,8 @@ def decode(logits):
         self.assertIn("VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: \"0\"", recipe)
         self.assertIn("VLLM_PREFIX_CACHE_RETENTION_INTERVAL: \"\"", recipe)
         self.assertIn("OMP_NUM_THREADS: \"8\"", recipe)
+        self.assertIn("auto_remove: true", recipe)
+        self.assertNotIn("restart_policy:", recipe)
         self.assertNotIn("--kv-cache-memory-bytes", recipe)
         self.assertNotIn("--speculative-config", recipe)
         self.assertNotIn("memory_limit:", recipe)

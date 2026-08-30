@@ -51,6 +51,23 @@ proxy for the dynamically shared GB10 CPU/GPU memory pool and can turn a
 recoverable allocation failure into a prematurely killed container. SparkRun's
 host setup and lifecycle controls remain responsible for node protection.
 
+### Clean up a failed launch before retrying
+
+SparkRun's native executor is an otherwise-idle `sleep infinity` container;
+vLLM itself runs through `docker exec`. If that vLLM command fails after model
+loading, the executor can remain alive with its cgroup still charged for model
+file cache and shared memory. Stop the SparkRun job before retrying so Docker
+removes that executor:
+
+```bash
+sparkrun stop glm53-exl3-4x-safe --hosts host1,host2,host3,host4
+```
+
+If the job is already failed and the exact executor is still present, first
+confirm it has no live vLLM process (`docker top <container>`), then remove
+only that named stale container with `docker rm -f <container>`. Do this on
+each affected node. Do not use a blanket Docker prune on the DGX Spark.
+
 Keep this recipe eager until it completes a cold start and sustained requests.
 Capture `sparkrun logs glm53-exl3-4x-safe`, `sparkrun status`, host `dmesg`, and
 `memory.events` on any failed node before changing one dimension at a time:
