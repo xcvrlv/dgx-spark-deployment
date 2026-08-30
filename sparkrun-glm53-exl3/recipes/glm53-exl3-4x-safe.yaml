@@ -41,10 +41,10 @@ env:
   NCCL_IB_MERGE_NICS: "0"
   NCCL_IB_SUBNET_AWARE_ROUTING: "1"
   NCCL_IB_GID_INDEX: "3"
-  OMP_NUM_THREADS: "4"
-  OPENBLAS_NUM_THREADS: "4"
-  MKL_NUM_THREADS: "4"
-  NUMEXPR_NUM_THREADS: "4"
+  OMP_NUM_THREADS: "8"
+  OPENBLAS_NUM_THREADS: "8"
+  MKL_NUM_THREADS: "8"
+  NUMEXPR_NUM_THREADS: "8"
   TOKENIZERS_PARALLELISM: "false"
   MALLOC_ARENA_MAX: "2"
   VLLM_USE_B12X_DCP_A2A: "1"
@@ -55,6 +55,9 @@ env:
   VLLM_USE_AOT_COMPILE: "1"
   VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
   VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "0"
+  # This may be inherited from a cluster-wide SparkRun environment. GLM-5.3
+  # has neither sliding-window nor Mamba KV groups, so vLLM rejects it.
+  VLLM_PREFIX_CACHE_RETENTION_INTERVAL: ""
 
 executor: docker
 executor_config:
