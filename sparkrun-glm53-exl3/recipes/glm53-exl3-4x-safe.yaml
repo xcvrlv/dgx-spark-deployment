@@ -21,7 +21,9 @@ defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 4
-  gpu_memory_utilization: 0.85
+  # The initialized GB10 worker reports 101.76/121.63 GiB free (0.8366).
+  # Keep a small admission margin rather than failing vLLM's pre-load gate.
+  gpu_memory_utilization: 0.83
   max_model_len: 32768
   max_num_seqs: 1
   max_num_batched_tokens: 1024

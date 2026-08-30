@@ -36,12 +36,17 @@ path is deliberately the Hugging Face cache root: the command reads `refs/main`
 and the complete root is mounted, so snapshot-to-blob symlinks work without
 another copy of the weights.
 
-The 0.85 utilization leaves roughly 19 GiB of the 128 GiB unified-memory pool
-outside vLLM's target allocation. Compared with the proven 0.80 launch, this
-adds about 6.1 GiB to vLLM's per-node allocation target. `gpu_memory_utilization` is an allocation
-budget, not a complete host-RAM limit: model loading, graph capture,
+The initialized worker reported 101.76 GiB free out of 121.63 GiB. A 0.85
+target requests 103.38 GiB and therefore fails vLLM's admission check before
+model loading. The 0.83 target requests about 100.95 GiB, leaving roughly
+0.81 GiB of startup margin while adding about 3.65 GiB to the proven 0.80
+allocation. `gpu_memory_utilization` is an allocation budget, not a complete
+host-RAM limit: model loading, graph capture,
 communication buffers, Python processes, and page cache can consume additional
-memory. Unlike the previous 0.85 recipe, this one does not reserve a fixed
+memory. Raising it does not itself make MTP fit; it primarily gives vLLM more
+KV-cache budget, while MTP weights, activations, and graph memory are profiled
+before the remaining KV capacity is chosen. Unlike the previous 0.85 recipe,
+this one does not reserve a fixed
 16.5 GB KV slab or capture Q1–Q40. `FULL_DECODE_ONLY` with capture size `[1]`
 covers the current single-request ordinary decode path while leaving prefill
 and mixed batches eager. CUDA-graph memory estimation is enabled so KV sizing

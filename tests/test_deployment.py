@@ -468,7 +468,7 @@ def decode(logits):
         self.assertIn("runtime: vllm-distributed", recipe)
         self.assertIn("container: spark-vllm-glm52-exl3:sparkring-switch-v1", recipe)
         self.assertIn("model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw", recipe)
-        self.assertIn('gpu_memory_utilization: 0.85', recipe)
+        self.assertIn('gpu_memory_utilization: 0.83', recipe)
         self.assertIn('max_model_len: 32768', recipe)
         self.assertIn('max_num_seqs: 1', recipe)
         self.assertIn('revision="$(cat "$model_root/refs/main")"', recipe)
