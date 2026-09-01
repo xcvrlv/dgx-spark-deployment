@@ -144,3 +144,26 @@ If no SparkRun cluster has been configured yet, run `sparkrun setup wizard`
 interactively before the launch. It can set up the SSH mesh, RDMA detection,
 and early-OOM protection, so review its detected networking and sudo changes
 instead of accepting them blindly on this existing switched fabric.
+
+### Rank-0 crash capture
+
+The recipe temporarily instruments vLLM's worker SIGTERM/SIGINT handler and
+enables reduced CUDA exception dumps. Per-node Python signal traces and CUDA
+dumps are retained under the model root's `.runtime-diagnostics` directory.
+The CUDA dump excludes global, shared, and local GPU memory, preventing an
+exception from writing a model-sized artifact.
+
+On the head Spark, start the host-side signal trace in a second SSH session as
+soon as SparkRun creates the executor container:
+
+```bash
+bash sparkrun-glm53-exl3/scripts/trace-head-worker-signals.sh
+```
+
+The script waits up to 15 minutes for `Worker_TP0_DCP0`, then attaches a
+signal-only `strace`. Keep that SSH session open. If SIGTERM or SIGINT is sent
+through a normal userspace signal syscall, the trace records its `si_pid` and
+`si_uid`. On failure, collect both `$HOME/glm53-runtime-diagnostics` from the
+head and `.runtime-diagnostics` from each node's model cache before cleanup.
+An intentional SparkRun stop will also be recorded and is expected to produce
+exit status 143 for SIGTERM.

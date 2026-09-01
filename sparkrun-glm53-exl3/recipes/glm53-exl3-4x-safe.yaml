@@ -42,6 +42,16 @@ defaults:
 env:
 
   LD_PRELOAD: /usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
+  # Crash-capture run: keep evidence in the identity-mounted model root so it
+  # survives SparkRun container cleanup on every node. CUDA memory segments are
+  # deliberately omitted from the dump; otherwise one failure could emit an
+  # artifact comparable in size to the loaded model.
+  GLM53_DIAGNOSTICS_DIR: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw/.runtime-diagnostics
+  PYTHONFAULTHANDLER: "1"
+  CUDA_ENABLE_COREDUMP_ON_EXCEPTION: "1"
+  CUDA_ENABLE_CPU_COREDUMP_ON_EXCEPTION: "0"
+  CUDA_COREDUMP_GENERATION_FLAGS: skip_nonrelocated_elf_images,skip_global_memory,skip_shared_memory,skip_local_memory,skip_abort
+  CUDA_COREDUMP_FILE: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw/.runtime-diagnostics/core.cuda.%t.%h.%p.nvcudmp
   VLLM_NCCL_SO_PATH: /opt/sparkring/nccl/libnccl.so.2
   VLLM_USE_V2_MODEL_RUNNER: "1"
   CUTE_DSL_ARCH: sm_121a
@@ -126,6 +136,71 @@ command: |
   # value is not sufficient because vLLM parses it with int(); remove it.
   unset VLLM_PREFIX_CACHE_RETENTION_INTERVAL
   model_root="{model}"
+  mkdir -p "$GLM53_DIAGNOSTICS_DIR"
+  test -w "$GLM53_DIAGNOSTICS_DIR"
+  # This vLLM branch normally logs SIGTERM/SIGINT only at DEBUG and raises a
+  # bare SystemExit, which makes an externally signalled worker look like a
+  # clean exit (status 0). Make the event durable and preserve its real status.
+  python3 - <<'PY'
+  from pathlib import Path
+
+  path = Path(
+      "/opt/venv/lib/python3.12/site-packages/vllm/v1/executor/"
+      "multiproc_executor.py"
+  )
+  source = path.read_text()
+  marker = "GLM53_DIAGNOSTIC_SIGNAL_HANDLER"
+  old = '''                logger.debug(
+                      "WorkerProc handling signal %d, raising SystemExit", signum
+                  )
+                  raise SystemExit()
+  '''
+  new = '''                # GLM53_DIAGNOSTIC_SIGNAL_HANDLER
+                  import faulthandler
+                  import os
+                  import socket
+                  import sys
+                  import time
+
+                  logger.critical(
+                      "WorkerProc received signal %d; dumping all Python stacks "
+                      "and exiting with status %d",
+                      signum,
+                      128 + signum,
+                  )
+                  try:
+                      faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+                      diagnostics_dir = os.getenv("GLM53_DIAGNOSTICS_DIR")
+                      if diagnostics_dir:
+                          dump_path = os.path.join(
+                              diagnostics_dir,
+                              "worker-signal.%s.%d.log"
+                              % (socket.gethostname(), os.getpid()),
+                          )
+                          with open(dump_path, "a", encoding="utf-8") as stream:
+                              stream.write(
+                                  "time=%s pid=%d signal=%d exit_status=%d\\n"
+                                  % (time.time(), os.getpid(), signum, 128 + signum)
+                              )
+                              faulthandler.dump_traceback(
+                                  file=stream, all_threads=True
+                              )
+                  except BaseException:
+                      logger.exception("Failed to persist worker signal traceback")
+                  raise SystemExit(128 + signum)
+  '''
+  if marker in source:
+      print(f"Diagnostic signal handler already installed in {path}")
+  else:
+      matches = source.count(old)
+      if matches != 1:
+          raise SystemExit(
+              f"Refusing uninstrumented launch: expected one signal-handler "
+              f"anchor in {path}, found {matches}"
+          )
+      path.write_text(source.replace(old, new))
+      print(f"Installed diagnostic signal handler in {path}")
+  PY
   # The model root is identity-mounted from every Spark. Keeping online-K6
   # artifacts here makes the expensive first conversion persistent even though
   # the short-lived SparkRun executor container is removed after each run.
