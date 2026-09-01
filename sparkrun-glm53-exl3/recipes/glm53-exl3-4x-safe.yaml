@@ -26,12 +26,12 @@ defaults:
   # Keep this as a startup admission guard even though fixed KV bytes control
   # the cache allocation. The clean-start worker measured 112.90/121.63 GiB
   # free and a 0.89 target of 108.25 GiB.
-  gpu_memory_utilization: 0.90
+  gpu_memory_utilization: 0.89
   # Keep the successfully launched fixed cache size while testing online K6.
   # The K6 weight saving should become additional UMA headroom, not an
   # automatic KV-cache expansion. This value is per Spark/GPU.
   max_model_len: 1048576
-  max_num_seqs: 16
+  max_num_seqs: 8
   max_num_batched_tokens: 4096
   served_model_name: glm-5.3-exl3-tr3-3.42bpw
 
@@ -174,4 +174,4 @@ command: |
     --generation-config vllm \
     --hf-overrides '{"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
     --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":3,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X_MLA_SPARSE\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
-    --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32,36,40,44,48,52,56,60,64],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'
+    --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'

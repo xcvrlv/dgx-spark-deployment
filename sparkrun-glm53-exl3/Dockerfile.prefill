@@ -1,0 +1,20 @@
+FROM spark-vllm-glm52-exl3:sparkring-switch-v1
+
+USER root
+COPY overlay/patch_indexer_workspace.py /opt/glm53-prefill/patch_indexer_workspace.py
+
+# Patch only the exact vLLM source shipped in the pinned SparkRing R7 image.
+# Preflight computes and compiles the deterministic result without writing;
+# the second preflight proves the installed state is the expected output.
+RUN /opt/venv/bin/python /opt/glm53-prefill/patch_indexer_workspace.py --preflight \
+ && /opt/venv/bin/python /opt/glm53-prefill/patch_indexer_workspace.py \
+ && /opt/venv/bin/python /opt/glm53-prefill/patch_indexer_workspace.py --preflight
+
+# Carry the optimization in the image but require the recipe to opt in.  This
+# leaves a same-image rollback path via GLM53_INDEXER_WORKSPACE=stock.
+ENV GLM53_INDEXER_WORKSPACE=stock
+
+LABEL org.opencontainers.image.title="SparkRing GLM-5.3 EXL3 prefill workspace overlay" \
+      org.opencontainers.image.description="Mixed-K3/K4 SparkRing runtime with opt-in sparse-indexer workspace right-sizing" \
+      ai.openai.prefill-overlay.source="MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks@2022ce5" \
+      ai.openai.prefill-overlay.version="glm53-indexer-workspace-v1"

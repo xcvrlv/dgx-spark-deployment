@@ -1,10 +1,21 @@
 # GLM-5.3 EXL3 SparkRun bring-up
 
-This is a small, independent SparkRun recipe for the already-built
-`spark-vllm-glm52-exl3:sparkring-switch-v1` image and the existing local model
-cache. It does not build or pull an image, download a model, create a fixed
-oversized KV cache, or capture prefill graphs. It enables an experimental MTP4
-path for up to eight sequences; prefill and mixed batches stay eager.
+This is a small, independent SparkRun recipe for the locally derived
+`spark-vllm-glm52-exl3:sparkring-switch-prefill-v2` image and the existing
+local model cache. It does not pull an image, download a model, create a fixed
+oversized KV cache, or capture prefill graphs. It enables an experimental MTP3
+path for up to sixteen sequences; prefill and mixed batches stay eager.
+
+Build the small overlay once on the head Spark, then stream it to the other
+three nodes (replace the worker names with the management hosts used by the
+cluster):
+
+```bash
+bash sparkrun-glm53-exl3/scripts/build-prefill-image.sh host2 host3 host4
+```
+
+The build is hash-gated against the exact `sparkring-switch-v1` vLLM source and
+fails without modifying the image if that ABI has drifted.
 
 Run the commands from a Spark that can SSH to all four nodes:
 
@@ -46,8 +57,8 @@ communication buffers, Python processes, and page cache can consume additional
 memory. This recipe fixes the per-node KV pool at 18,000,000,000 bytes. Online
 K6 weight savings are deliberately left as additional UMA headroom during the
 first correctness and memory A/B instead of being immediately reassigned to
-KV. MTP4 verifies five tokens per sequence, so
-`FULL_DECODE_ONLY` captures `[5,10,15,20,25,30,35,40]` for one through eight
+KV. MTP3 verifies four rows per sequence, so
+`FULL_DECODE_ONLY` captures `[4,8,12,...,64]` for one through sixteen
 uniform speculative-decode requests while leaving prefill and mixed batches
 eager. CUDA-graph memory estimation is enabled so KV sizing accounts for graph
 headroom during profiling; the explicit KV pool prevents a conservative graph
@@ -62,9 +73,40 @@ bulk-prefill Trellis planner uses the measured block-size-32 setting and a
 Spark/GLM-5.3 deployment. Block size 16 is unusable because this image lacks
 W4A16 register-table key `(256, 1, 32, 2, False)` and fails during the
 memory-profile dummy run.
-MTP4's five rows per request remain in the small-M Trellis path
-through eight sequences by pinning its upper threshold to 48; this prevents
-the 35- and 40-row decode graphs from entering the bulk-prefill planner during
+
+The derived image also carries the sparse-indexer workspace right-sizing from
+MiaAI-Lab commit `2022ce5`, enabled by this recipe with
+`GLM53_INDEXER_WORKSPACE=rightsize`. At this recipe's 1,048,576-token context,
+16-sequence cap, MTP3, and `index_kpool=4`, the stock permanent allocation is
+41,943,040 entries (5.156 GiB). The legal per-step bound is 4,194,320 entries
+(528.002 MiB), returning an estimated 4.641 GiB per Spark to the allocator.
+This does not make indexer kernels faster; it creates UMA/KV/graph headroom and
+should make the next 8K-capacity experiment substantially more realistic.
+The first launch deliberately retains the already measured 4096/4096 EXL
+prefill settings so the memory change is isolated. Confirm all four TP ranks log
+`[GLM53_INDEXER_WORKSPACE] builder verified 4194320 entries` before trying
+8192/8192 again. Roll back without rebuilding by setting the knob to `stock`.
+
+### MiaAI-Lab PR 77 assessment
+
+Do not replace this image with the Flash image from PR 77. That implementation
+loads a uniform-K4 Flash checkpoint into fixed-width stacked expert tensors;
+its new CUDA path explicitly accepts only K4 MCG tensors. The full 3.42-bpw
+checkpoint has mixed K3/K4 routed experts, BF16 shared experts converted online
+to Trellis K6, TP4/DCP4 collectives, and a mixed-bit B12X prefill plan. Our
+large-M path already avoids the per-expert FP16 reconstruction fallback that
+PR 77 accelerates, so copying its fat-expert kernel would replace a working
+mixed one-grid plan with a K4-only side path and provide no demonstrated gain.
+
+PR 77's 7168-token default is also a one-shot result for the 321B Flash model,
+not a transferable optimum for the full 755B model. Its stated 8192 ceiling is
+caused by that image's Flash indexer shared-memory limit. Our 8192 failure was
+instead an earlyoom event while piecewise graphs and the larger EXL scratch
+capacity were active. Qualify our next capacity ladder with decode-only graphs:
+4096 baseline, 6144, 7168, then 8192 only if the preceding rung is stable.
+MTP3's four rows per request remain in the small-M Trellis path
+through sixteen sequences by pinning its upper threshold to 64; this prevents
+the 52- through 64-row decode graphs from entering the bulk-prefill planner during
 capture. The recipe also pins the proven SM121/B12X controls: V2 model runner, B12X sparse
 indexer, MTP verification through the sparse decode path, CKV gather disabled,
 DCP global top-k with a sharded draft, a 256 MiB sparse-indexer logits bound,
@@ -85,6 +127,17 @@ spend more than 15 minutes per rank creating the K6 artifacts; subsequent
 launches reuse `.exl3-online-k6` inside the identity-mounted Hugging Face model
 cache. Do not delete that directory between benchmarks. Adaptive MTP depths,
 decode-aware prefill, and its associated scheduler budgets remain absent.
+
+### Prefill qualification log
+
+| Date | Batched tokens | EXL3 prefill capacity | CUDA graph mode | GPU memory utilization | Result |
+| --- | ---: | ---: | --- | ---: | --- |
+| 2026-09-01 | 8192 | 8192 | `FULL_AND_PIECEWISE` | 0.89 | Failed before a usable prefill measurement. On the head Spark, available memory fell to 660 MiB (0.53%). At 17:36:14 earlyoom observed 0.69% available memory and 79.98% free swap, then sent SIGTERM to `VLLM::Worker_TP` (PID 2219074). No throughput result; lower capacities remain to be qualified. |
+
+Treat this row as a rejected capacity/graph combination, not as evidence that
+8192-token eager or decode-only-graph prefill is unsafe. Change one dimension
+at a time in subsequent runs and retain the first capacity which completes the
+uncached prefill benchmark without NVIDIA allocation errors or earlyoom action.
 
 Do not copy the v1 `mods/drop-caches` field into this native v2 recipe: the
 presence of `mods` selects SparkRun's legacy recipe path. To test whether page
@@ -128,8 +181,8 @@ confirm it has no live vLLM process (`docker top <container>`), then remove
 only that named stale container with `docker rm -f <container>`. Do this on
 each affected node. Do not use a blanket Docker prune on the DGX Spark.
 
-Confirm the logs report MTP with four speculative tokens, `FULL_DECODE_ONLY`,
-capture sizes through 40, and an 18,000,000,000-byte KV pool. Then record KV
+Confirm the logs report MTP with three speculative tokens, `FULL_DECODE_ONLY`,
+capture sizes through 64, and an 18,000,000,000-byte KV pool. Then record KV
 capacity, drafted-token acceptance,
 and generation throughput at concurrency 1 and 8. Capture `sparkrun logs
 glm53-exl3-4x-safe`, `sparkrun status`, host `dmesg`, and `memory.events` on any
