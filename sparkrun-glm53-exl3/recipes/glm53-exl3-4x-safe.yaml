@@ -9,6 +9,8 @@ name: glm53-exl3-4x-safe
 description: GLM-5.3 EXL3 experimental MTP4 on four Sparks, with decode-only graphs.
 model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw
 runtime: vllm-distributed
+runtime_congif:
+  dashboard: false
 container: spark-vllm-glm52-exl3:sparkring-switch-v1
 min_nodes: 4
 max_nodes: 4
@@ -24,13 +26,12 @@ defaults:
   # Keep this as a startup admission guard even though fixed KV bytes control
   # the cache allocation. The clean-start worker measured 112.90/121.63 GiB
   # free and a 0.89 target of 108.25 GiB.
-  gpu_memory_utilization: 0.89
+  gpu_memory_utilization: 0.90
   # Keep the successfully launched fixed cache size while testing online K6.
   # The K6 weight saving should become additional UMA headroom, not an
   # automatic KV-cache expansion. This value is per Spark/GPU.
-  kv_cache_memory_bytes: 18000000000
   max_model_len: 1048576
-  max_num_seqs: 8
+  max_num_seqs: 16
   max_num_batched_tokens: 4096
   served_model_name: glm-5.3-exl3-tr3-3.42bpw
 
@@ -39,16 +40,14 @@ defaults:
 # capacity. MTP4 CUDA graphs are restricted to the uniform speculative-decode
 # shapes below.
 env:
+
   LD_PRELOAD: /usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
   VLLM_NCCL_SO_PATH: /opt/sparkring/nccl/libnccl.so.2
-  VLLM_WORKER_MULTIPROC_METHOD: forkserver
   VLLM_USE_V2_MODEL_RUNNER: "1"
-  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
   CUTE_DSL_ARCH: sm_121a
   TORCH_CUDA_ARCH_LIST: 12.1a
   CUDA_DEVICE_MAX_CONNECTIONS: "32"
   NCCL_NET: IB
-  NCCL_CUMEM_ENABLE: "0"
   NCCL_NVLS_ENABLE: "0"
   NCCL_MAX_NCHANNELS: "4"
   NCCL_MIN_NCHANNELS: "4"
@@ -56,13 +55,10 @@ env:
   NCCL_IB_MERGE_NICS: "0"
   NCCL_IB_SUBNET_AWARE_ROUTING: "1"
   NCCL_IB_GID_INDEX: "3"
-  OMP_NUM_THREADS: "4"
-  OPENBLAS_NUM_THREADS: "4"
-  MKL_NUM_THREADS: "4"
-  NUMEXPR_NUM_THREADS: "4"
-  TOKENIZERS_PARALLELISM: "false"
+  OMP_NUM_THREADS: "8"
   MALLOC_ARENA_MAX: "2"
   VLLM_USE_B12X_DCP_A2A: "1"
+  NCCL_IGNORE_CPU_AFFINITY: "1"
   # The checkpoint stores routed experts as mixed K3/K4 EXL3, but its shared
   # experts remain BF16. Restore SparkRing's online Trellis-K6 conversion for
   # those eligible BF16 weights; --quantization exl3 alone does not enable it.
@@ -76,19 +72,21 @@ env:
   # Trellis path. Start bulk prefill at block-M 32: this is the conservative
   # specialization before separately qualifying the patched 16/8 variants.
   VLLM_EXL3_TRELLIS_MIN_M: "1"
-  VLLM_EXL3_TRELLIS_MAX_M: "48"
+  VLLM_EXL3_TRELLIS_MAX_M: "64"
   VLLM_EXL3_TRELLIS_BLOCK_M: "8"
   VLLM_EXL3_PREFILL_TRELLIS: "1"
   VLLM_EXL3_PREFILL_BLOCK_M: "32"
   VLLM_EXL3_PREFILL_CHUNK: "128"
   # Keep the explicitly tested accuracy-oriented B12X activation path. A8 is
   # disabled so the two force modes cannot become ambiguous across images.
-  B12X_MOE_FORCE_A8: "0"
-  B12X_MOE_FORCE_A16: "1"
   B12X_W4A16_TC_DECODE: "1"
   VLLM_USE_B12X_SPARSE_INDEXER: "1"
   VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE: "1"
-  VLLM_B12X_MLA_CKV_GATHER: "0"
+  VLLM_DCP_QUERY_SPLIT: "1"
+  VLLM_DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS: "8192"
+  VLLM_B12X_MLA_CKV_GATHER: "1"
+  VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS: "131072"
+  VLLM_B12X_MLA_CKV_PREFETCH_DEPTH: "0"
   VLLM_DCP_GLOBAL_TOPK: "1"
   VLLM_DCP_SHARD_DRAFT: "1"
   VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "256"
@@ -109,7 +107,7 @@ executor_config:
   # Remove the executor once SparkRun stops it. A failed `docker exec` can
   # otherwise leave its sleep-infinity executor holding model page cache and
   # /dev/shm allocations in the container cgroup.
-  auto_remove: true
+  auto_remove: false
   entrypoint: ""
   gpu_access_mode: gpus
   ipc: host
@@ -142,7 +140,6 @@ command: |
     --tensor-parallel-size {tensor_parallel} \
     --distributed-executor-backend mp \
     --gpu-memory-utilization {gpu_memory_utilization} \
-    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
     --max-model-len {max_model_len} \
     --max-num-seqs {max_num_seqs} \
     --max-num-batched-tokens {max_num_batched_tokens} \
@@ -156,14 +153,13 @@ command: |
     --decode-context-parallel-size 4 \
     --dcp-comm-backend ag_rs \
     --dcp-kv-cache-interleave-size 1 \
-    --disable-custom-all-reduce \
     --enable-chunked-prefill \
     --enable-prefix-caching \
-    --no-async-scheduling \
+    --async-scheduling \
     --reasoning-parser glm45 \
     --tool-call-parser glm47 \
     --enable-auto-tool-choice \
     --generation-config vllm \
     --hf-overrides '{"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
-    --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":4,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X_MLA_SPARSE\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
-    --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,5,10,15,20,25,30,35,40],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'
+    --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":3,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X_MLA_SPARSE\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
+    --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32,36,40,44,48,52,56,60,64],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'

@@ -57,12 +57,15 @@ capacity, not preallocated memory or a container memory limit.
 The 4096-token prefill batch is paired with
 `VLLM_EXL3_PREFILL_CAPACITY=4096`; increasing only the scheduler limit would
 leave the EXL3 scratch path sized for the earlier 1024-token baseline. The
-bulk-prefill Trellis planner starts with a conservative block size of 32 and a
-128-row chunk. MTP4's five rows per request remain in the small-M Trellis path
+bulk-prefill Trellis planner uses the measured block-size-32 setting and a
+128-row chunk. Block size 8 launched but reduced prefill throughput on this
+Spark/GLM-5.3 deployment. Block size 16 is unusable because this image lacks
+W4A16 register-table key `(256, 1, 32, 2, False)` and fails during the
+memory-profile dummy run.
+MTP4's five rows per request remain in the small-M Trellis path
 through eight sequences by pinning its upper threshold to 48; this prevents
 the 35- and 40-row decode graphs from entering the bulk-prefill planner during
-capture. Qualify prefill block sizes 16 and 8 only as separate A/B runs. The
-recipe also pins the proven SM121/B12X controls: V2 model runner, B12X sparse
+capture. The recipe also pins the proven SM121/B12X controls: V2 model runner, B12X sparse
 indexer, MTP verification through the sparse decode path, CKV gather disabled,
 DCP global top-k with a sharded draft, a 256 MiB sparse-indexer logits bound,
 four NCCL channels, and MTP acceptance instrumentation. Async scheduling is
