@@ -16,6 +16,7 @@ from packaging.version import Version
 
 VLLM_COMMIT = "70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19"
 B12X_COMMIT = "1e59a1fd09f782d302b1068b15c8a0bd66103894"
+B12X_ROCENANTE_COMMIT = "1a7e3ec286b0ff0b7c2aabee22dce08daab7e011"
 EXLLAMAV3_COMMIT = "704aefd743b390af4bd0fb429d1906f9b964c7d8"
 
 
@@ -46,10 +47,38 @@ def check_static_contract() -> dict[str, object]:
     ):
         assert hasattr(mixed, name), name
 
+    b12x = importlib.import_module("b12x")
+    from b12x.comm import roce
+
+    assert roce.API_VERSION == 1, roce.API_VERSION
+    b12x_root = Path(b12x.__file__).parent
+    roce_root = b12x_root / "comm/roce"
+    oneshot = (roce_root / "_oneshot_cute.py").read_text(encoding="utf-8")
+    runtime = (roce_root / "roce_oneshot.py").read_text(encoding="utf-8")
+    proxy = (roce_root / "_roce_proxy.c").read_text(encoding="utf-8")
+    assert "hca_count" in oneshot
+    assert "def _grid_blocks" in runtime
+    assert "#define ROCE_IDLE_SPINS 20000000" in proxy
+    proxy_cache = Path(
+        os.environ.get("B12X_ROCE_CACHE_DIR", "/opt/b12x-roce-cache")
+    )
+    assert any(proxy_cache.glob("roce_proxy-*.so")), proxy_cache
+
     root = Path(vllm.__file__).parent
     assert (root / "model_executor/layers/quantization/exl3.py").is_file()
     assert (root / "v1/worker/gpu/spec_decode/dflash2/speculator.py").is_file()
     assert (root / "model_executor/models/qwen3_dflash2.py").is_file()
+    roce_adapter = root / "distributed/device_communicators/b12x_roce_all_reduce.py"
+    communicator = root / "distributed/device_communicators/cuda_communicator.py"
+    envs = (root / "envs.py").read_text(encoding="utf-8")
+    assert roce_adapter.is_file(), roce_adapter
+    assert "B12X_ROCENANTE" in communicator.read_text(encoding="utf-8")
+    for name in (
+        "VLLM_ENABLE_ROCE_ALLREDUCE",
+        "VLLM_ROCE_ALLREDUCE_MAX_SIZE",
+        "VLLM_ROCE_ALLGATHER_MAX_SIZE",
+    ):
+        assert name in envs, name
     assert Path("/opt/sparkring/nccl/libnccl.so.2").is_file()
     assert Path("/usr/local/cuda/compat/libcuda.so.1").is_file()
 
@@ -61,6 +90,7 @@ def check_static_contract() -> dict[str, object]:
         "cutlass_dsl": version("nvidia-cutlass-dsl"),
         "vllm_commit": VLLM_COMMIT,
         "b12x_commit": B12X_COMMIT,
+        "b12x_rocenante_commit": B12X_ROCENANTE_COMMIT,
         "exllamav3_commit": EXLLAMAV3_COMMIT,
     }
 

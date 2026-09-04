@@ -255,6 +255,13 @@ For the current comparison it uses the checkpoint's native MTP heads with
 three speculative tokens. The image retains R22's DFlash2 implementation, but
 the recipe deliberately does not load the external draft model.
 
+The image keeps the qualified R22 B12X compute tree and composes only the
+later RoCEnante communication directory from b12x commit `1a7e3ec`. That adds
+dual-rail RoCE striping and size-aware CUDA-graph collectives without importing
+the newer, unrelated sparse-MLA and GLM-next cache changes. Eligible decode
+all-reduces and all-gathers use `B12X_ROCENANTE`; larger collectives continue
+through the switched-fabric NCCL fallback.
+
 The published Jovian Judgement R22 container is linux/amd64-only. DGX Spark is
 linux/arm64, so `Dockerfile.r22-dflash2` rebuilds the exact R22 vLLM commit and
 R22 B12X commit on a digest-pinned ARM64 vLLM nightly. It compiles
@@ -309,7 +316,8 @@ Before promoting this candidate, require all of the following:
 
 - all four nodes report the image ID printed by the build script;
 - startup logs identify the V2 runner, EXL3 target, native MTP speculator,
-  three speculative tokens, TP4/DCP4, full-CKV gather, and decode-only graphs;
+  three speculative tokens, TP4/DCP4, full-CKV gather, decode-only graphs, and
+  `B12X_ROCENANTE` in the TP communicator's backend list;
 - API health, finite-logprob, reasoning, and tool-call smoke tests pass;
 - a long-context generation and a sustained concurrency-8 run complete without
   worker exit, earlyoom action, CUDA allocation failure, or NCCL timeout;

@@ -53,6 +53,8 @@ def test_immutable_arm64_source_composition() -> None:
         "c7345580eb4e4753420ebae812f5ec12a442c95a",
         "1e59a1fd09f782d302b1068b15c8a0bd66103894",
         "f322c804eec1c58a63bd4fe6e7901a95a678a575",
+        "1a7e3ec286b0ff0b7c2aabee22dce08daab7e011",
+        "f1729d4e7f5b4f1867bcbe8283eac167132a04b5",
         "704aefd743b390af4bd0fb429d1906f9b964c7d8",
     ):
         assert identity in DOCKERFILE
@@ -68,9 +70,11 @@ def test_immutable_arm64_source_composition() -> None:
         "libcurand-dev-${cuda_version_dash}",
         "libcusolver-dev-${cuda_version_dash}",
         "libcusparse-dev-${cuda_version_dash}",
+        "libibverbs-dev",
     ):
         assert package in DOCKERFILE
     assert "test -r /usr/local/cuda/include/cusparse.h" in DOCKERFILE
+    assert "test -r /usr/include/infiniband/verbs.h" in DOCKERFILE
     assert "test -e /usr/local/cuda/lib64/libnvrtc.so" in DOCKERFILE
     for build_requirement in (
         '"setuptools==80.10.2"',
@@ -85,6 +89,17 @@ def test_immutable_arm64_source_composition() -> None:
     assert "test -r /usr/local/cuda/compat/libcuda.so.1" in DOCKERFILE
     assert "COPY overlay/smoke_r22_image.py" in DOCKERFILE
     assert "&& python3 /opt/compose/smoke_r22_image.py" in DOCKERFILE
+    assert (
+        'git -C /opt/b12x-r22 restore --source="${B12X_ROCENANTE_COMMIT}"'
+        in DOCKERFILE
+    )
+    assert "git -C /opt/b12x-r22 add b12x/comm/roce" in DOCKERFILE
+    assert (
+        'test "$(git -C /opt/b12x-r22 write-tree)" = "${B12X_COMPOSED_TREE}"'
+        in DOCKERFILE
+    )
+    assert "from b12x.comm.roce._proxy import load" in DOCKERFILE
+    assert "B12X_ROCE_CACHE_DIR=/opt/b12x-roce-cache" in DOCKERFILE
     assert 'sparkring.fabric.image.id="${SPARKRING_FABRIC_IMAGE_ID}"' in DOCKERFILE
     assert "torch_version.release[:2] == (2, 13)" in DOCKERFILE
     assert "nvidia-cutlass-dsl\") == \"4.6.2\"" in DOCKERFILE
@@ -157,6 +172,7 @@ def test_sparkrun_mounts_only_the_target_for_model_native_mtp() -> None:
 def test_four_spark_mtp3_runtime_contract() -> None:
     required = (
         "name: glm53-exl3-r22-mtp3-4x",
+        "container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v2",
         "min_nodes: 4",
         "max_nodes: 4",
         "tensor_parallel: 4",
@@ -178,13 +194,16 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "VLLM_MTP_INSTRUMENT: \"1\"",
         "VLLM_USE_MEGA_AOT_ARTIFACT: \"1\"",
         "VLLM_ENABLE_PCIE_ALLREDUCE: \"0\"",
+        "VLLM_ENABLE_ROCE_ALLREDUCE: \"1\"",
+        "VLLM_ROCE_ALLREDUCE_MAX_SIZE: 2MB",
+        "VLLM_ROCE_ALLGATHER_MAX_SIZE: 16MB",
+        "B12X_ROCE_CACHE_DIR: /opt/b12x-roce-cache",
         "--block-size 2048",
         "--dtype bfloat16",
         "--quantization exl3",
         "--load-format instanttensor",
         "--model-loader-extra-config '{\"instanttensor_copy\":false}'",
         "--attention-backend B12X_MLA_SPARSE",
-        "--disable-custom-all-reduce",
         "--no-enable-flashinfer-autotune",
         "--decode-context-parallel-size {decode_context_parallel}",
         '\\"method\\":\\"mtp\\"',
@@ -197,6 +216,7 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         assert value in RECIPE, value
     assert '\\"method\\":\\"dflash\\"' not in RECIPE
     assert '\\"num_speculative_tokens\\":7' not in RECIPE
+    assert "--disable-custom-all-reduce" not in RECIPE
     for inapplicable in (
         "PYTHONPATH",
         "CUDA_VISIBLE_DEVICES",
@@ -231,7 +251,7 @@ def test_cluster_image_distribution_is_identity_checked() -> None:
     assert "remote_id=" in BUILDER and 'test "$remote_id" = "$local_id"' in BUILDER
     assert BUILDER.count('test "$remote_platform" = "linux/arm64"') == 1
     assert BUILDER.count("/opt/compose/smoke_r22_image.py --gpu") == 2
-    assert "r22-dflash2-sm121-v1" in BUILDER
+    assert "r22-dflash2-sm121-v2" in BUILDER
 
 
 def test_gpu_smoke_exercises_sm121_and_cuda_graph_replay() -> None:
@@ -241,6 +261,13 @@ def test_gpu_smoke_exercises_sm121_and_cuda_graph_replay() -> None:
     assert "torch.cuda.CUDAGraph()" in smoke
     assert "graph.replay()" in smoke
     assert 'Path("/opt/sparkring/nccl/libnccl.so.2").is_file()' in smoke
+    assert "roce.API_VERSION == 1" in smoke
+    assert 'assert "hca_count" in oneshot' in smoke
+    assert 'assert "def _grid_blocks" in runtime' in smoke
+    assert 'assert "#define ROCE_IDLE_SPINS 20000000" in proxy' in smoke
+    assert 'proxy_cache.glob("roce_proxy-*.so")' in smoke
+    assert '"distributed/device_communicators/b12x_roce_all_reduce.py"' in smoke
+    assert 'assert "B12X_ROCENANTE" in communicator.read_text' in smoke
 
 
 def test_r22_smoke_registration_patch_is_late_and_fail_closed() -> None:

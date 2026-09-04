@@ -14,6 +14,8 @@ ARG VLLM_EXL3_COMMIT=3c0a496caf9339f396b0be8da6910b1887920709
 ARG VLLM_COMPOSED_TREE=c7345580eb4e4753420ebae812f5ec12a442c95a
 ARG B12X_R22_COMMIT=1e59a1fd09f782d302b1068b15c8a0bd66103894
 ARG B12X_R22_TREE=f322c804eec1c58a63bd4fe6e7901a95a678a575
+ARG B12X_ROCENANTE_COMMIT=1a7e3ec286b0ff0b7c2aabee22dce08daab7e011
+ARG B12X_COMPOSED_TREE=f1729d4e7f5b4f1867bcbe8283eac167132a04b5
 ARG EXLLAMAV3_COMMIT=704aefd743b390af4bd0fb429d1906f9b964c7d8
 ARG MAX_JOBS=8
 
@@ -29,7 +31,8 @@ ENV TORCH_CUDA_ARCH_LIST=12.1a \
     VLLM_USE_PRECOMPILED=0 \
     VLLM_EXL3_EXT_PATH=/opt/exllamav3 \
     VLLM_EXL3_ENCODER_SOURCE=/opt/exllamav3-python/exllamav3 \
-    VLLM_EXL3_ENCODER_REVISION=704aefd743b390af4bd0fb429d1906f9b964c7d8
+    VLLM_EXL3_ENCODER_REVISION=704aefd743b390af4bd0fb429d1906f9b964c7d8 \
+    B12X_ROCE_CACHE_DIR=/opt/b12x-roce-cache
 
 USER root
 
@@ -46,7 +49,7 @@ RUN apt-get update \
     && cuda_version_dash="$(nvcc --version | sed -nE 's/.*release ([0-9]+)\.([0-9]+).*/\1-\2/p')" \
     && test -n "${cuda_version_dash}" \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      build-essential cmake git ninja-build pkg-config \
+      build-essential cmake git libibverbs-dev ninja-build pkg-config \
       "libcublas-dev-${cuda_version_dash}" \
       "libcurand-dev-${cuda_version_dash}" \
       "libcusolver-dev-${cuda_version_dash}" \
@@ -54,6 +57,7 @@ RUN apt-get update \
     && test -r /usr/local/cuda/include/cublas_v2.h \
     && test -r /usr/local/cuda/include/cusolverDn.h \
     && test -r /usr/local/cuda/include/cusparse.h \
+    && test -r /usr/include/infiniband/verbs.h \
     && rm -rf /var/lib/apt/lists/*
 
 # R22 imports its Rust build hooks while preparing wheel metadata. Because the
@@ -105,10 +109,17 @@ RUN python3 /opt/compose/patch_r22_exl3.py /opt/vllm-r22 \
       vllm/model_executor/warmup/kernel_warmup.py \
     && test "$(git -C /opt/vllm-r22 write-tree)" = "${VLLM_COMPOSED_TREE}"
 
+# Keep the qualified R22 compute stack while taking only the later dual-rail,
+# size-aware RoCEnante implementation from b12x master.
 RUN git clone --filter=blob:none --no-checkout \
       https://github.com/local-inference-lab/b12x.git /opt/b12x-r22 \
     && git -C /opt/b12x-r22 checkout --detach "${B12X_R22_COMMIT}" \
-    && test "$(git -C /opt/b12x-r22 rev-parse 'HEAD^{tree}')" = "${B12X_R22_TREE}"
+    && test "$(git -C /opt/b12x-r22 rev-parse 'HEAD^{tree}')" = "${B12X_R22_TREE}" \
+    && git -C /opt/b12x-r22 restore --source="${B12X_ROCENANTE_COMMIT}" -- \
+      b12x/comm/roce \
+    && git -C /opt/b12x-r22 diff --check \
+    && git -C /opt/b12x-r22 add b12x/comm/roce \
+    && test "$(git -C /opt/b12x-r22 write-tree)" = "${B12X_COMPOSED_TREE}"
 
 RUN git clone --filter=blob:none --no-checkout \
       https://github.com/brandonmmusic-max/exllamav3.git /opt/exllamav3-python \
@@ -162,6 +173,22 @@ RUN if [ -f /opt/vllm-r22/use_existing_torch.py ]; then \
     && python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
       /opt/vllm-r22
 
+# RoCEnante's posting proxy is plain C over libibverbs. Build and load it now
+# so missing headers or an unusable shared object fail the image build instead
+# of silently disabling the backend during a four-node launch.
+RUN install -d -m 0755 "${B12X_ROCE_CACHE_DIR}" \
+    && python3 - <<'PY'
+from pathlib import Path
+
+from b12x.comm.roce._proxy import load
+
+library = load()
+path = Path(str(library._name))
+assert path.is_file(), path
+assert path.parent == Path("/opt/b12x-roce-cache"), path
+print(f"Prebuilt RoCEnante proxy: {path}")
+PY
+
 # Keep this correction after the expensive vLLM wheel layer so a smoke-only
 # failure does not invalidate the source compilation cache on the next build.
 COPY overlay/patch_smoke_r22_registration.py /opt/compose/patch_smoke_r22_registration.py
@@ -172,12 +199,14 @@ RUN python3 /opt/compose/patch_smoke_r22_registration.py \
     && python3 /opt/compose/smoke_r22_image.py
 
 LABEL org.opencontainers.image.title="GLM-5.3 EXL3 + DFlash2 R22 SM121 vLLM" \
-      org.opencontainers.image.description="ARM64 DGX Spark source composition of Local Inference Lab R22 and R7 EXL3" \
+      org.opencontainers.image.description="ARM64 DGX Spark R22/R7 EXL3 composition with dual-rail RoCEnante" \
       local-inference.vllm.commit="70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19" \
       local-inference.vllm.tree="89481110674c08be1759a9222c525a0be14ad52a" \
       local-inference.vllm.composed.tree="c7345580eb4e4753420ebae812f5ec12a442c95a" \
       local-inference.b12x.commit="1e59a1fd09f782d302b1068b15c8a0bd66103894" \
       local-inference.b12x.tree="f322c804eec1c58a63bd4fe6e7901a95a678a575" \
+      local-inference.b12x.rocenante.commit="1a7e3ec286b0ff0b7c2aabee22dce08daab7e011" \
+      local-inference.b12x.composed.tree="f1729d4e7f5b4f1867bcbe8283eac167132a04b5" \
       local-inference.exllamav3.commit="704aefd743b390af4bd0fb429d1906f9b964c7d8" \
       sparkring.fabric.source="${SPARKRING_FABRIC_IMAGE}" \
       sparkring.fabric.image.id="${SPARKRING_FABRIC_IMAGE_ID}"

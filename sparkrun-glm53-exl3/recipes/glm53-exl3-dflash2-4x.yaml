@@ -8,7 +8,7 @@ model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3
 runtime: vllm-distributed
 runtime_config:
   dashboard: false
-container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v1
+container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v2
 min_nodes: 4
 max_nodes: 4
 
@@ -18,6 +18,7 @@ metadata:
   runtime_release: local-inference-lab-r22-jovian-judgement
   runtime_commit: 70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19
   b12x_commit: 1e59a1fd09f782d302b1068b15c8a0bd66103894
+  b12x_rocenante_commit: 1a7e3ec286b0ff0b7c2aabee22dce08daab7e011
 
 defaults:
   port: 8000
@@ -52,6 +53,12 @@ env:
   NCCL_IB_SUBNET_AWARE_ROUTING: "1"
   NCCL_IB_GID_INDEX: "3"
   NCCL_IGNORE_CPU_AFFINITY: "1"
+  # Route eligible small TP collectives through dual-rail RoCEnante. The
+  # SparkRing NCCL transport remains the fallback above these bounds.
+  VLLM_ENABLE_ROCE_ALLREDUCE: "1"
+  VLLM_ROCE_ALLREDUCE_MAX_SIZE: 2MB
+  VLLM_ROCE_ALLGATHER_MAX_SIZE: 16MB
+  B12X_ROCE_CACHE_DIR: /opt/b12x-roce-cache
   OMP_NUM_THREADS: "8"
   OPENBLAS_NUM_THREADS: "8"
   MKL_NUM_THREADS: "8"
@@ -108,8 +115,8 @@ env:
   VLLM_USE_B12X_SPARSE_INDEXER: "1"
   VLLM_USE_AOT_COMPILE: "1"
   VLLM_USE_MEGA_AOT_ARTIFACT: "1"
-  # SparkRing provides inter-node NCCL/RDMA. B12X PCIe all-reduce is a
-  # single-host path and must not be selected for this TP4 deployment.
+  # B12X PCIe all-reduce is a separate single-host path and must not be
+  # selected for this one-GPU-per-node TP4 deployment.
   VLLM_ENABLE_PCIE_ALLREDUCE: "0"
   VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
   VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
@@ -159,7 +166,6 @@ command: |
     --model-loader-extra-config '{"instanttensor_copy":false}' \
     --attention-backend B12X_MLA_SPARSE \
     --moe-backend b12x \
-    --disable-custom-all-reduce \
     --no-enable-flashinfer-autotune \
     --kv-cache-dtype fp8 \
     --decode-context-parallel-size {decode_context_parallel} \
