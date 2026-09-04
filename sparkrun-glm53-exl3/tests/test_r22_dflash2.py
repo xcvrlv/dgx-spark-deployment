@@ -50,7 +50,7 @@ def test_immutable_arm64_source_composition() -> None:
         "70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19",
         "89481110674c08be1759a9222c525a0be14ad52a",
         "3c0a496caf9339f396b0be8da6910b1887920709",
-        "368d50eaa852813f39721faa9d83ca022fc8f7fb",
+        "44e88bef701cac90e06a84f506bbd2958c9662d5",
         "1e59a1fd09f782d302b1068b15c8a0bd66103894",
         "f322c804eec1c58a63bd4fe6e7901a95a678a575",
         "1a7e3ec286b0ff0b7c2aabee22dce08daab7e011",
@@ -158,6 +158,10 @@ def test_exl3_overlay_is_fail_closed_and_uses_r22_b12x_abi() -> None:
     assert "patch_quant_override_order(root)" in source
     assert 'path = root / "vllm/config/model.py"' in source
     assert "Rank-sliced EXL3 checkpoints retain a ModelOpt dispatch tag" in source
+    assert "patch_sm121_flashmla_build(root)" in source
+    assert "FlashMLA only supplies sm90/sm100 kernels" in source
+    assert "add_custom_target(_flashmla_C)" in source
+    assert "CMakeLists.txt" in DOCKERFILE
     assert "vllm/config/model.py" in DOCKERFILE
 
 

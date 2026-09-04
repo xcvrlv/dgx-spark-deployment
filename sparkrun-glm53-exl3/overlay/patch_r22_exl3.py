@@ -110,6 +110,19 @@ def patch_quant_override_order(root: Path) -> None:
     )
 
 
+def patch_sm121_flashmla_build(root: Path) -> None:
+    path = root / "CMakeLists.txt"
+    replace_once(
+        path,
+        "    include(cmake/external_projects/flashmla.cmake)\n",
+        "    # FlashMLA only supplies sm90/sm100 kernels. This image targets sm121\n"
+        "    # and uses B12X_MLA_SPARSE, so retain setup.py's optional targets\n"
+        "    # without fetching FlashMLA and its otherwise-unused CUTLASS submodule.\n"
+        "    add_custom_target(_flashmla_C)\n"
+        "    add_custom_target(_flashmla_extension_C)\n",
+    )
+
+
 def patch_quant_overlay(root: Path) -> None:
     path = root / "vllm/config/quantization.py"
     replace_once(
@@ -370,6 +383,11 @@ def patch_warmup(root: Path) -> None:
 
 def verify_patched(root: Path) -> None:
     checks = {
+        "CMakeLists.txt": (
+            "FlashMLA only supplies sm90/sm100 kernels",
+            "add_custom_target(_flashmla_C)",
+            "add_custom_target(_flashmla_extension_C)",
+        ),
         "vllm/model_executor/layers/quantization/__init__.py": (
             '"exl3": Exl3Config',
         ),
@@ -420,6 +438,7 @@ def main() -> None:
     verify_source(root)
     patch_quant_registry(root)
     patch_quant_override_order(root)
+    patch_sm121_flashmla_build(root)
     patch_quant_overlay(root)
     patch_exl3_backend(root)
     patch_ballast_release(root)
