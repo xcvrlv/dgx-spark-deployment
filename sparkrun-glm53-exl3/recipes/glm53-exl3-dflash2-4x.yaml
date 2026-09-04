@@ -32,7 +32,9 @@ defaults:
   served_model_name: glm-5.3-exl3-r22-mtp3
 
 env:
-  LD_PRELOAD: /usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
+  # Let NVIDIA Container Toolkit mount the Spark host's matching libcuda.
+  # Preloading the image's forward-compat driver causes CUDA error 803.
+  LD_PRELOAD: /opt/sparkring/nccl/libnccl.so.2
   VLLM_NCCL_SO_PATH: /opt/sparkring/nccl/libnccl.so.2
   CUDA_HOME: /usr/local/cuda
   TRITON_PTXAS_PATH: /usr/local/cuda/bin/ptxas

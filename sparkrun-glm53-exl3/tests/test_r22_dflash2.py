@@ -178,6 +178,8 @@ def test_sparkrun_mounts_only_the_target_for_model_native_mtp() -> None:
 
 
 def test_four_spark_mtp3_runtime_contract() -> None:
+    assert "LD_PRELOAD: /opt/sparkring/nccl/libnccl.so.2" in RECIPE
+    assert "LD_PRELOAD: /usr/local/cuda/compat/libcuda.so.1" not in RECIPE
     required = (
         "name: glm53-exl3-r22-mtp3-4x",
         "container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v3",
