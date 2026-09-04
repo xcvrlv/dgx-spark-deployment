@@ -167,7 +167,7 @@ command: |
     --quantization-config '{"linear":{"weight":"mxfp8"},"shared_experts":{"weight":"mxfp8"},"ignore":["re:.*\\.fused_qkv_a_proj$","re:.*\\.q_a_proj$","re:.*kv_a_proj_with_mqa","re:.*\\.mlp\\.gate$","model.layers.78.eh_proj","lm_head"]}' \
     --load-format instanttensor \
     --model-loader-extra-config '{"instanttensor_copy":false}' \
-    --attention-backend B12X_MLA_SPARSE \
+    --attention-backend B12X \
     --moe-backend b12x \
     --no-enable-flashinfer-autotune \
     --kv-cache-dtype fp8 \

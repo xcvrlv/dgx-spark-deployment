@@ -214,7 +214,7 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "--quantization exl3",
         "--load-format instanttensor",
         "--model-loader-extra-config '{\"instanttensor_copy\":false}'",
-        "--attention-backend B12X_MLA_SPARSE",
+        "--attention-backend B12X",
         "--no-enable-flashinfer-autotune",
         "--decode-context-parallel-size {decode_context_parallel}",
         '\\"method\\":\\"mtp\\"',
