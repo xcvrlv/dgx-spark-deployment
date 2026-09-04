@@ -61,6 +61,13 @@ def test_immutable_arm64_source_composition() -> None:
     ):
         assert package in DOCKERFILE
     assert "test -r /usr/local/cuda/include/cusparse.h" in DOCKERFILE
+    for build_requirement in (
+        '"setuptools==80.10.2"',
+        '"setuptools-scm==10.2.3"',
+        '"setuptools-rust==1.13.0"',
+        '"wheel==0.48.0"',
+    ):
+        assert build_requirement in DOCKERFILE
     assert "COPY --from=sparkring-fabric /opt/sparkring/nccl" in DOCKERFILE
     assert 'test -n "${SPARKRING_FABRIC_IMAGE_ID}"' in DOCKERFILE
     assert "test -r /opt/sparkring/nccl/libnccl.so.2" in DOCKERFILE

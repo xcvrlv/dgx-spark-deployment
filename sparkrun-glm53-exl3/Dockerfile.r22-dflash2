@@ -56,6 +56,28 @@ RUN apt-get update \
     && test -r /usr/local/cuda/include/cusparse.h \
     && rm -rf /var/lib/apt/lists/*
 
+# R22 imports its Rust build hooks while preparing wheel metadata. Because the
+# source installs below deliberately disable build isolation, mirror and pin
+# that part of the commit's pyproject build-system contract in the base env.
+RUN python3 -m pip install --no-cache-dir --upgrade \
+      "setuptools==80.10.2" \
+      "setuptools-scm==10.2.3" \
+      "setuptools-rust==1.13.0" \
+      "wheel==0.48.0" \
+    && python3 - <<'PY'
+from importlib.metadata import version
+
+expected = {
+    "setuptools": "80.10.2",
+    "setuptools-scm": "10.2.3",
+    "setuptools-rust": "1.13.0",
+    "wheel": "0.48.0",
+}
+for package, wanted in expected.items():
+    installed = version(package)
+    assert installed == wanted, (package, installed, wanted)
+PY
+
 RUN git clone --filter=blob:none --no-checkout \
       https://github.com/local-inference-lab/vllm.git /opt/vllm-r22 \
     && git -C /opt/vllm-r22 checkout --detach "${VLLM_R22_COMMIT}" \
