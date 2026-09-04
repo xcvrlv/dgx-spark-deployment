@@ -50,7 +50,7 @@ def test_immutable_arm64_source_composition() -> None:
         "70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19",
         "89481110674c08be1759a9222c525a0be14ad52a",
         "3c0a496caf9339f396b0be8da6910b1887920709",
-        "c7345580eb4e4753420ebae812f5ec12a442c95a",
+        "368d50eaa852813f39721faa9d83ca022fc8f7fb",
         "1e59a1fd09f782d302b1068b15c8a0bd66103894",
         "f322c804eec1c58a63bd4fe6e7901a95a678a575",
         "1a7e3ec286b0ff0b7c2aabee22dce08daab7e011",
@@ -155,6 +155,10 @@ def test_exl3_overlay_is_fail_closed_and_uses_r22_b12x_abi() -> None:
     assert "module.run_bound_mixed_trellis3(" in source
     assert 'kwargs["w13_layout"] = "trellis_t256_proj"' in source
     assert "expected exactly one source anchor" in source
+    assert "patch_quant_override_order(root)" in source
+    assert 'path = root / "vllm/config/model.py"' in source
+    assert "Rank-sliced EXL3 checkpoints retain a ModelOpt dispatch tag" in source
+    assert "vllm/config/model.py" in DOCKERFILE
 
 
 def test_sparkrun_mounts_only_the_target_for_model_native_mtp() -> None:
@@ -172,7 +176,7 @@ def test_sparkrun_mounts_only_the_target_for_model_native_mtp() -> None:
 def test_four_spark_mtp3_runtime_contract() -> None:
     required = (
         "name: glm53-exl3-r22-mtp3-4x",
-        "container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v2",
+        "container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v3",
         "min_nodes: 4",
         "max_nodes: 4",
         "tensor_parallel: 4",
@@ -254,7 +258,7 @@ def test_cluster_image_distribution_is_identity_checked() -> None:
     assert "remote_id=" in BUILDER and 'test "$remote_id" = "$local_id"' in BUILDER
     assert BUILDER.count('test "$remote_platform" = "linux/arm64"') == 1
     assert BUILDER.count("/opt/compose/smoke_r22_image.py --gpu") == 2
-    assert "r22-dflash2-sm121-v2" in BUILDER
+    assert "r22-dflash2-sm121-v3" in BUILDER
 
 
 def test_gpu_smoke_exercises_sm121_and_cuda_graph_replay() -> None:

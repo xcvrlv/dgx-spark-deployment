@@ -95,6 +95,21 @@ def patch_quant_registry(root: Path) -> None:
     )
 
 
+def patch_quant_override_order(root: Path) -> None:
+    path = root / "vllm/config/model.py"
+    replace_once(
+        path,
+        '                "moe_wna16",\n'
+        '                "modelopt",\n',
+        '                "moe_wna16",\n'
+        "                # Rank-sliced EXL3 checkpoints retain a ModelOpt dispatch tag\n"
+        "                # for backward compatibility, so EXL3 must inspect metadata\n"
+        "                # before the ModelOpt overrides claim them.\n"
+        '                "exl3",\n'
+        '                "modelopt",\n',
+    )
+
+
 def patch_quant_overlay(root: Path) -> None:
     path = root / "vllm/config/quantization.py"
     replace_once(
@@ -358,6 +373,9 @@ def verify_patched(root: Path) -> None:
         "vllm/model_executor/layers/quantization/__init__.py": (
             '"exl3": Exl3Config',
         ),
+        "vllm/config/model.py": (
+            '                "exl3",\n                "modelopt",',
+        ),
         "vllm/config/quantization.py": (
             "shared_experts: QuantSpec | None",
             '_CHECKPOINT_ONLINE_OVERLAY_WEIGHTS = {\n    "exl3"',
@@ -401,6 +419,7 @@ def main() -> None:
 
     verify_source(root)
     patch_quant_registry(root)
+    patch_quant_override_order(root)
     patch_quant_overlay(root)
     patch_exl3_backend(root)
     patch_ballast_release(root)
