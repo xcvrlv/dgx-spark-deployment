@@ -123,6 +123,53 @@ def patch_sm121_flashmla_build(root: Path) -> None:
     )
 
 
+def patch_b12x_glm_dsa_fp8_abi(root: Path) -> None:
+    path = root / "vllm/v1/attention/backends/mla/b12x_mla_sparse.py"
+    replace_once(
+        path,
+        "_GLM_DSA_NVFP4_CACHE_RECORD_BYTES = 368\n",
+        "_GLM_DSA_FP8_CACHE_RECORD_BYTES = 656\n"
+        "_GLM_DSA_NVFP4_CACHE_RECORD_BYTES = 368\n",
+    )
+    replace_once(
+        path,
+        "        if self._is_glm_next and self._uses_nvfp4_cache:\n"
+        "            self._cache_record_bytes = _GLM_NEXT_NVFP4_CACHE_RECORD_BYTES\n"
+        "        elif self._uses_glm_dsa_nvfp4_cache:\n"
+        "            self._cache_record_bytes = _GLM_DSA_NVFP4_CACHE_RECORD_BYTES\n"
+        "        else:\n"
+        "            self._cache_record_bytes = _GLM_NEXT_CACHE_RECORD_BYTES\n",
+        "        if self._is_glm_next:\n"
+        "            self._cache_record_bytes = (\n"
+        "                _GLM_NEXT_NVFP4_CACHE_RECORD_BYTES\n"
+        "                if self._uses_nvfp4_cache\n"
+        "                else _GLM_NEXT_CACHE_RECORD_BYTES\n"
+        "            )\n"
+        "        elif self._is_glm_dsa:\n"
+        "            self._cache_record_bytes = (\n"
+        "                _GLM_DSA_NVFP4_CACHE_RECORD_BYTES\n"
+        "                if self._uses_nvfp4_cache\n"
+        "                else _GLM_DSA_FP8_CACHE_RECORD_BYTES\n"
+        "            )\n"
+        "        else:\n"
+        "            self._cache_record_bytes = _GLM_NEXT_CACHE_RECORD_BYTES\n",
+    )
+    replace_once(
+        path,
+        "        elif self._uses_glm_dsa_nvfp4_cache:\n"
+        "            self._model_type = int(module.ModelType.GLM_NSA)\n"
+        "            self._concat_and_cache_nvfp4_mla_fp8_rope = (\n"
+        "                module.concat_and_cache_nvfp4_mla_fp8_rope\n"
+        "            )\n",
+        "        elif self._is_glm_dsa:\n"
+        "            self._model_type = int(module.ModelType.GLM_NSA)\n"
+        "            if self._uses_glm_dsa_nvfp4_cache:\n"
+        "                self._concat_and_cache_nvfp4_mla_fp8_rope = (\n"
+        "                    module.concat_and_cache_nvfp4_mla_fp8_rope\n"
+        "                )\n",
+    )
+
+
 def patch_quant_overlay(root: Path) -> None:
     path = root / "vllm/config/quantization.py"
     replace_once(
@@ -388,6 +435,12 @@ def verify_patched(root: Path) -> None:
             "add_custom_target(_flashmla_C)",
             "add_custom_target(_flashmla_extension_C)",
         ),
+        "vllm/v1/attention/backends/mla/b12x_mla_sparse.py": (
+            "_GLM_DSA_FP8_CACHE_RECORD_BYTES = 656",
+            "elif self._is_glm_dsa:",
+            "else _GLM_DSA_FP8_CACHE_RECORD_BYTES",
+            "self._model_type = int(module.ModelType.GLM_NSA)",
+        ),
         "vllm/model_executor/layers/quantization/__init__.py": (
             '"exl3": Exl3Config',
         ),
@@ -420,6 +473,7 @@ def verify_patched(root: Path) -> None:
         "vllm/model_executor/layers/quantization/exl3.py",
         "vllm/model_executor/layers/quantization/exl3_online_cache.py",
         "vllm/config/quantization.py",
+        "vllm/v1/attention/backends/mla/b12x_mla_sparse.py",
     ):
         py_compile.compile(str(root / relative), doraise=True)
 
@@ -439,6 +493,7 @@ def main() -> None:
     patch_quant_registry(root)
     patch_quant_override_order(root)
     patch_sm121_flashmla_build(root)
+    patch_b12x_glm_dsa_fp8_abi(root)
     patch_quant_overlay(root)
     patch_exl3_backend(root)
     patch_ballast_release(root)

@@ -11,7 +11,7 @@ ARG SPARKRING_FABRIC_IMAGE_ID
 ARG VLLM_R22_COMMIT=70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19
 ARG VLLM_R22_TREE=89481110674c08be1759a9222c525a0be14ad52a
 ARG VLLM_EXL3_COMMIT=3c0a496caf9339f396b0be8da6910b1887920709
-ARG VLLM_COMPOSED_TREE=44e88bef701cac90e06a84f506bbd2958c9662d5
+ARG VLLM_COMPOSED_TREE=72f7ec613af3af7f4aac46024baa4d4f6aca528c
 ARG B12X_R22_COMMIT=1e59a1fd09f782d302b1068b15c8a0bd66103894
 ARG B12X_R22_TREE=f322c804eec1c58a63bd4fe6e7901a95a678a575
 ARG B12X_ROCENANTE_COMMIT=1a7e3ec286b0ff0b7c2aabee22dce08daab7e011
@@ -108,6 +108,7 @@ RUN python3 /opt/compose/patch_r22_exl3.py /opt/vllm-r22 \
       vllm/model_executor/layers/quantization/exl3.py \
       vllm/model_executor/layers/quantization/exl3_online_cache.py \
       vllm/model_executor/model_loader/utils.py \
+      vllm/v1/attention/backends/mla/b12x_mla_sparse.py \
       vllm/model_executor/warmup/kernel_warmup.py \
     && test "$(git -C /opt/vllm-r22 write-tree)" = "${VLLM_COMPOSED_TREE}"
 
