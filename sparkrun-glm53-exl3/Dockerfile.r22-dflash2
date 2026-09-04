@@ -162,7 +162,14 @@ RUN if [ -f /opt/vllm-r22/use_existing_torch.py ]; then \
     && python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
       /opt/vllm-r22
 
-RUN python3 /opt/compose/smoke_r22_image.py
+# Keep this correction after the expensive vLLM wheel layer so a smoke-only
+# failure does not invalidate the source compilation cache on the next build.
+COPY overlay/patch_smoke_r22_registration.py /opt/compose/patch_smoke_r22_registration.py
+RUN python3 /opt/compose/patch_smoke_r22_registration.py \
+      /opt/compose/smoke_r22_image.py \
+    && python3 /opt/compose/patch_smoke_r22_registration.py \
+      /opt/compose/smoke_r22_image.py --check \
+    && python3 /opt/compose/smoke_r22_image.py
 
 LABEL org.opencontainers.image.title="GLM-5.3 EXL3 + DFlash2 R22 SM121 vLLM" \
       org.opencontainers.image.description="ARM64 DGX Spark source composition of Local Inference Lab R22 and R7 EXL3" \

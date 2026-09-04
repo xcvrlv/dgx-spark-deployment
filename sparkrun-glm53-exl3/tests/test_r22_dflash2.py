@@ -15,6 +15,7 @@ RECIPE = (ROOT / "recipes/glm53-exl3-dflash2-4x.yaml").read_text(encoding="utf-8
 BUILDER = (ROOT / "scripts/build-r22-dflash2-image.sh").read_text(encoding="utf-8")
 PATCH_PATH = ROOT / "overlay/patch_r22_exl3.py"
 EXLLAMA_ARM_PATCH_PATH = ROOT / "overlay/patch_exllamav3_aarch64.py"
+SMOKE_PATCH_PATH = ROOT / "overlay/patch_smoke_r22_registration.py"
 SMOKE_PATH = ROOT / "overlay/smoke_r22_image.py"
 
 SPEC = importlib.util.spec_from_file_location("patch_r22_exl3", PATCH_PATH)
@@ -28,6 +29,13 @@ ARM_SPEC = importlib.util.spec_from_file_location(
 assert ARM_SPEC is not None and ARM_SPEC.loader is not None
 arm_patch = importlib.util.module_from_spec(ARM_SPEC)
 ARM_SPEC.loader.exec_module(arm_patch)
+
+SMOKE_SPEC = importlib.util.spec_from_file_location(
+    "patch_smoke_r22_registration", SMOKE_PATCH_PATH
+)
+assert SMOKE_SPEC is not None and SMOKE_SPEC.loader is not None
+smoke_patch = importlib.util.module_from_spec(SMOKE_SPEC)
+SMOKE_SPEC.loader.exec_module(smoke_patch)
 
 
 def test_immutable_arm64_source_composition() -> None:
@@ -76,7 +84,7 @@ def test_immutable_arm64_source_composition() -> None:
     assert "test -r /opt/sparkring/nccl/libnccl.so.2" in DOCKERFILE
     assert "test -r /usr/local/cuda/compat/libcuda.so.1" in DOCKERFILE
     assert "COPY overlay/smoke_r22_image.py" in DOCKERFILE
-    assert "RUN python3 /opt/compose/smoke_r22_image.py" in DOCKERFILE
+    assert "&& python3 /opt/compose/smoke_r22_image.py" in DOCKERFILE
     assert 'sparkring.fabric.image.id="${SPARKRING_FABRIC_IMAGE_ID}"' in DOCKERFILE
     assert "torch_version.release[:2] == (2, 13)" in DOCKERFILE
     assert "nvidia-cutlass-dsl\") == \"4.6.2\"" in DOCKERFILE
@@ -233,6 +241,24 @@ def test_gpu_smoke_exercises_sm121_and_cuda_graph_replay() -> None:
     assert "torch.cuda.CUDAGraph()" in smoke
     assert "graph.replay()" in smoke
     assert 'Path("/opt/sparkring/nccl/libnccl.so.2").is_file()' in smoke
+
+
+def test_r22_smoke_registration_patch_is_late_and_fail_closed() -> None:
+    patch = SMOKE_PATCH_PATH.read_text(encoding="utf-8")
+    assert 'exl3_config_cls = get_quantization_config("exl3")' in patch
+    assert 'exl3_config_cls().get_name() == "exl3"' in patch
+    copy = "COPY overlay/patch_smoke_r22_registration.py"
+    install = "python3 -m pip install --no-cache-dir --no-build-isolation --no-deps"
+    assert DOCKERFILE.index(copy) > DOCKERFILE.rindex(install)
+    assert "patch_smoke_r22_registration.py" in DOCKERFILE
+    assert "/opt/compose/smoke_r22_image.py --check" in DOCKERFILE
+
+    with tempfile.TemporaryDirectory() as temporary:
+        smoke = Path(temporary) / "smoke.py"
+        smoke.write_text(smoke_patch.OLD, encoding="utf-8")
+        smoke_patch.patch(smoke, check=False)
+        smoke_patch.patch(smoke, check=True)
+        assert smoke.read_text(encoding="utf-8") == smoke_patch.NEW
 
 
 def test_exact_patched_tree_when_available() -> None:
