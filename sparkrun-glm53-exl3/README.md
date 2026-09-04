@@ -260,7 +260,9 @@ later RoCEnante communication directory from b12x commit `1a7e3ec`. That adds
 dual-rail RoCE striping and size-aware CUDA-graph collectives without importing
 the newer, unrelated sparse-MLA and GLM-next cache changes. Eligible decode
 all-reduces and all-gathers use `B12X_ROCENANTE`; larger collectives continue
-through the switched-fabric NCCL fallback.
+through the switched-fabric NCCL fallback. Both paths are pinned to the two
+active RDMA HCAs present on every node, `rocep1s0f0` and `roceP2p1s0f0`, at
+GID index 3.
 
 The published Jovian Judgement R22 container is linux/amd64-only. DGX Spark is
 linux/arm64, so `Dockerfile.r22-dflash2` rebuilds the exact R22 vLLM commit and

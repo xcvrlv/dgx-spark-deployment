@@ -51,10 +51,13 @@ env:
   NCCL_CROSS_NIC: "1"
   NCCL_IB_MERGE_NICS: "0"
   NCCL_IB_SUBNET_AWARE_ROUTING: "1"
+  NCCL_IB_HCA: rocep1s0f0,roceP2p1s0f0
   NCCL_IB_GID_INDEX: "3"
   NCCL_IGNORE_CPU_AFFINITY: "1"
   # Route eligible small TP collectives through dual-rail RoCEnante. The
   # SparkRing NCCL transport remains the fallback above these bounds.
+  B12X_ROCE_HCA: rocep1s0f0,roceP2p1s0f0
+  B12X_ROCE_GID_INDEX: "3"
   VLLM_ENABLE_ROCE_ALLREDUCE: "1"
   VLLM_ROCE_ALLREDUCE_MAX_SIZE: 2MB
   VLLM_ROCE_ALLGATHER_MAX_SIZE: 16MB
