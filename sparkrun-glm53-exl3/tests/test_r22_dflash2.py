@@ -218,6 +218,7 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "--no-enable-flashinfer-autotune",
         "--decode-context-parallel-size {decode_context_parallel}",
         '\\"method\\":\\"mtp\\"',
+        '\\"attention_backend\\":\\"B12X\\"',
         '\\"num_speculative_tokens\\":3',
         '\\"draft_tensor_parallel_size\\":4',
         '\\"draft_sample_method\\":\\"greedy\\"',
