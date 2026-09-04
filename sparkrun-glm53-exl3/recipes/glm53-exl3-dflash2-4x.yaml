@@ -75,6 +75,9 @@ env:
   # The checkpoint's routed experts are mixed K3/K4. Its BF16 dense/shared
   # expert projections are converted once to K6 and cached beside the model.
   VLLM_EXL3_EXT_PATH: /opt/exllamav3
+  # B12X imports exllamav3_ext directly for had_r_128 instead of resolving it
+  # through VLLM_EXL3_EXT_PATH.
+  PYTHONPATH: /opt/exllamav3
   VLLM_EXL3_ENCODER_SOURCE: /opt/exllamav3-python/exllamav3
   VLLM_EXL3_ENCODER_REVISION: 704aefd743b390af4bd0fb429d1906f9b964c7d8
   VLLM_EXL3_ONLINE_TRELLIS_BITS: "6"
@@ -143,6 +146,7 @@ command: |
   model_path="$(resolve_snapshot "$model_root")"
   mkdir -p "$model_root/.exl3-online-k6-r22"
   test -w "$model_root/.exl3-online-k6-r22"
+  python3 -c 'import torch, exllamav3_ext; assert hasattr(exllamav3_ext, "had_r_128")'
   exec vllm serve "$model_path" \
     --served-model-name {served_model_name} \
     --host {host} --port {port} \
@@ -152,7 +156,7 @@ command: |
     --max-model-len {max_model_len} \
     --max-num-seqs {max_num_seqs} \
     --max-num-batched-tokens {max_num_batched_tokens} \
-    --block-size 2048 \
+    --block-size 64 \
     --quantization exl3 \
     --quantization-config '{"linear":{"weight":"mxfp8"},"shared_experts":{"weight":"mxfp8"},"ignore":["re:.*\\.fused_qkv_a_proj$","re:.*\\.q_a_proj$","re:.*kv_a_proj_with_mqa","re:.*\\.mlp\\.gate$","model.layers.78.eh_proj","lm_head"]}' \
     --load-format safetensors \

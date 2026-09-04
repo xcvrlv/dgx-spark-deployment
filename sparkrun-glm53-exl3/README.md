@@ -320,6 +320,11 @@ first tensor on the four-Spark mixed-EXL3 path. The recipe also leaves `--dtype`
 unset, so vLLM's default `auto` mode follows the checkpoint configuration; the
 checkpoint's non-EXL3 carrier tensors and activations remain BF16.
 
+`PYTHONPATH=/opt/exllamav3` is intentional for this composition. vLLM can use
+`VLLM_EXL3_EXT_PATH` to load its private extension handle, but R22 B12X imports
+`exllamav3_ext` by module name when resolving the `had_r_128` rotations for
+online K6/Trellis warmup. The recipe checks that symbol before starting vLLM.
+
 Before promoting this candidate, require all of the following:
 
 - all four nodes report the image ID printed by the build script;

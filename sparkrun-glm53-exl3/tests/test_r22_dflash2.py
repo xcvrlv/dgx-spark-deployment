@@ -202,6 +202,7 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "HF_HUB_OFFLINE: \"1\"",
         "TRANSFORMERS_OFFLINE: \"1\"",
         "VLLM_EXL3_ONLINE_TRELLIS_BITS: \"6\"",
+        "PYTHONPATH: /opt/exllamav3",
         "VLLM_B12X_MLA_CKV_GATHER: \"1\"",
         "VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE: \"1\"",
         "VLLM_DCP_GLOBAL_TOPK: \"1\"",
@@ -219,6 +220,8 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "--block-size 2048",
         "--quantization exl3",
         "--load-format safetensors",
+        "import torch, exllamav3_ext",
+        'hasattr(exllamav3_ext, "had_r_128")',
         "--attention-backend B12X",
         "--no-enable-flashinfer-autotune",
         "--decode-context-parallel-size {decode_context_parallel}",
@@ -235,7 +238,6 @@ def test_four_spark_mtp3_runtime_contract() -> None:
     assert '\\"num_speculative_tokens\\":7' not in RECIPE
     assert "--disable-custom-all-reduce" not in RECIPE
     for inapplicable in (
-        "PYTHONPATH",
         "CUDA_VISIBLE_DEVICES",
         "SAFETENSORS_FAST_GPU",
         "INSTANTTENSOR_",
