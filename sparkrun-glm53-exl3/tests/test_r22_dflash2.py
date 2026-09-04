@@ -54,6 +54,8 @@ def test_immutable_arm64_source_composition() -> None:
     assert "TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas" in DOCKERFILE
     assert "test -x /usr/local/cuda/bin/ptxas" in DOCKERFILE
     for package in (
+        "cuda-nvrtc-${cuda_version_dash}",
+        "cuda-nvrtc-dev-${cuda_version_dash}",
         "libcublas-dev-${cuda_version_dash}",
         "libcurand-dev-${cuda_version_dash}",
         "libcusolver-dev-${cuda_version_dash}",
@@ -61,6 +63,7 @@ def test_immutable_arm64_source_composition() -> None:
     ):
         assert package in DOCKERFILE
     assert "test -r /usr/local/cuda/include/cusparse.h" in DOCKERFILE
+    assert "test -e /usr/local/cuda/lib64/libnvrtc.so" in DOCKERFILE
     for build_requirement in (
         '"setuptools==80.10.2"',
         '"setuptools-scm==10.2.3"',

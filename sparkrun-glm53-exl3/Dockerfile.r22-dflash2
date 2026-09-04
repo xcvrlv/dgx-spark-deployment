@@ -141,6 +141,18 @@ assert version("nvidia-cutlass-dsl") == "4.6.2"
 print("Pinned ARM64 base dependency contract is compatible with R22")
 PY
 
+# The runtime-oriented ARM64 nightly omits NVRTC's link-time library. Install
+# it in a late layer so retries retain the expensive ExLlamaV3 build cache.
+RUN cuda_version_dash="$(nvcc --version | sed -nE 's/.*release ([0-9]+)\.([0-9]+).*/\1-\2/p')" \
+    && test -n "${cuda_version_dash}" \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      "cuda-nvrtc-${cuda_version_dash}" \
+      "cuda-nvrtc-dev-${cuda_version_dash}" \
+    && test -r /usr/local/cuda/include/nvrtc.h \
+    && test -e /usr/local/cuda/lib64/libnvrtc.so \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN if [ -f /opt/vllm-r22/use_existing_torch.py ]; then \
       python3 /opt/vllm-r22/use_existing_torch.py; \
     fi \
