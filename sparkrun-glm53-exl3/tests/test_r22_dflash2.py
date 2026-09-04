@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import tempfile
 from pathlib import Path
 
 
@@ -20,6 +21,13 @@ SPEC = importlib.util.spec_from_file_location("patch_r22_exl3", PATCH_PATH)
 assert SPEC is not None and SPEC.loader is not None
 overlay = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(overlay)
+
+ARM_SPEC = importlib.util.spec_from_file_location(
+    "patch_exllamav3_aarch64", EXLLAMA_ARM_PATCH_PATH
+)
+assert ARM_SPEC is not None and ARM_SPEC.loader is not None
+arm_patch = importlib.util.module_from_spec(ARM_SPEC)
+ARM_SPEC.loader.exec_module(arm_patch)
 
 
 def test_immutable_arm64_source_composition() -> None:
@@ -69,10 +77,38 @@ def test_exllamav3_build_has_aarch64_cpu_probe_compatibility() -> None:
     source = EXLLAMA_ARM_PATCH_PATH.read_text(encoding="utf-8")
     assert '"avx2_target.cpp"' in source
     assert '"avx512_target.cpp"' in source
+    assert '"all_reduce_cpu_avx2.cpp"' in source
+    assert '"all_reduce_cpu_avx512.cpp"' in source
     assert "#if defined(__aarch64__)" in source
     assert 'f"{signature} {{ return false; }}"' in source
+    assert "ExLlamaV3 AVX2 CPU all-reduce is unavailable on AArch64" in source
+    assert "ExLlamaV3 AVX-512 CPU all-reduce is unavailable on AArch64" in source
     assert "COPY overlay/patch_exllamav3_aarch64.py" in DOCKERFILE
     assert "patch_exllamav3_aarch64.py /opt/exllamav3-python --check" in DOCKERFILE
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        source_dir = root / "exllamav3" / "exllamav3_ext"
+        parallel_dir = source_dir / "parallel"
+        parallel_dir.mkdir(parents=True)
+        (source_dir / "avx2_target.cpp").write_text(
+            'bool is_avx2_supported() { return __builtin_cpu_supports("avx2"); }\n',
+            encoding="utf-8",
+        )
+        (source_dir / "avx512_target.cpp").write_text(
+            'bool is_avx512_supported() { return __builtin_cpu_supports("avx512f"); }\n',
+            encoding="utf-8",
+        )
+        for name in ("all_reduce_cpu_avx2.cpp", "all_reduce_cpu_avx512.cpp"):
+            (parallel_dir / name).write_text(
+                "#include <immintrin.h>\nvoid perform_cpu_reduce() {}\n",
+                encoding="utf-8",
+            )
+        arm_patch.patch(root, check=False)
+        arm_patch.patch(root, check=True)
+        for path in source_dir.rglob("*.cpp"):
+            patched = path.read_text(encoding="utf-8")
+            assert patched.count(arm_patch.MARKER) == 1, path
 
 
 def test_exl3_overlay_is_fail_closed_and_uses_r22_b12x_abi() -> None:
