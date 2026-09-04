@@ -72,17 +72,6 @@ env:
   TOKENIZERS_PARALLELISM: "false"
   MALLOC_ARENA_MAX: "2"
 
-  # InstantTensor streams the local checkpoint without a second full model
-  # copy. A 512 MiB buffer is intentionally retained on unified-memory Sparks;
-  # the proposed 1.25 GiB buffer buys startup headroom at the cost of serving RAM.
-  INSTANTTENSOR_BACKEND: BUFFERED
-  INSTANTTENSOR_BUFFER_SIZE: "536870912"
-  INSTANTTENSOR_CHUNK_SIZE: "2097152"
-  INSTANTTENSOR_CONCURRENCY: "1"
-  INSTANTTENSOR_IO_DEPTH: "3"
-  INSTANTTENSOR_MAX_FREE_MEM_USAGE: "0.05"
-  INSTANTTENSOR_COPY: "0"
-
   # The checkpoint's routed experts are mixed K3/K4. Its BF16 dense/shared
   # expert projections are converted once to K6 and cached beside the model.
   VLLM_EXL3_EXT_PATH: /opt/exllamav3
@@ -164,11 +153,9 @@ command: |
     --max-num-seqs {max_num_seqs} \
     --max-num-batched-tokens {max_num_batched_tokens} \
     --block-size 2048 \
-    --dtype bfloat16 \
     --quantization exl3 \
     --quantization-config '{"linear":{"weight":"mxfp8"},"shared_experts":{"weight":"mxfp8"},"ignore":["re:.*\\.fused_qkv_a_proj$","re:.*\\.q_a_proj$","re:.*kv_a_proj_with_mqa","re:.*\\.mlp\\.gate$","model.layers.78.eh_proj","lm_head"]}' \
-    --load-format instanttensor \
-    --model-loader-extra-config '{"instanttensor_copy":false}' \
+    --load-format safetensors \
     --attention-backend B12X \
     --moe-backend b12x \
     --no-enable-flashinfer-autotune \

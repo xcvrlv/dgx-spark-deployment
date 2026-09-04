@@ -314,6 +314,12 @@ The first cold launch creates a separate `.exl3-online-k6-r22` cache. Keep it
 between runs. Do not reuse the old image's `.exl3-online-k6` directory: encoder,
 B12X, and loader identities are part of the cache contract.
 
+This comparison recipe uses vLLM's ordinary safetensors loader. InstantTensor's
+zero-copy ring-buffer mode was removed after it segfaulted before loading the
+first tensor on the four-Spark mixed-EXL3 path. The recipe also leaves `--dtype`
+unset, so vLLM's default `auto` mode follows the checkpoint configuration; the
+checkpoint's non-EXL3 carrier tensors and activations remain BF16.
+
 Before promoting this candidate, require all of the following:
 
 - all four nodes report the image ID printed by the build script;

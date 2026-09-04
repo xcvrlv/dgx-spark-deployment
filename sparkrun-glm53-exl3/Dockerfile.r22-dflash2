@@ -95,7 +95,7 @@ COPY overlay/patch_exllamav3_aarch64.py /opt/compose/patch_exllamav3_aarch64.py
 COPY overlay/smoke_r22_image.py /opt/compose/smoke_r22_image.py
 
 # The patch verifies the immutable R22 commit and both restored EXL3 blobs.
-# Staging only the six composed files gives the whole source tree a reproducible
+# Staging only the nine composed files gives the whole source tree a reproducible
 # identity and makes any accidental overlay drift fail the image build.
 RUN python3 /opt/compose/patch_r22_exl3.py /opt/vllm-r22 \
     && python3 /opt/compose/patch_r22_exl3.py /opt/vllm-r22 --check \
@@ -205,7 +205,7 @@ LABEL org.opencontainers.image.title="GLM-5.3 EXL3 + DFlash2 R22 SM121 vLLM" \
       org.opencontainers.image.description="ARM64 DGX Spark R22/R7 EXL3 composition with dual-rail RoCEnante" \
       local-inference.vllm.commit="70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19" \
       local-inference.vllm.tree="89481110674c08be1759a9222c525a0be14ad52a" \
-      local-inference.vllm.composed.tree="c7345580eb4e4753420ebae812f5ec12a442c95a" \
+      local-inference.vllm.composed.tree="72f7ec613af3af7f4aac46024baa4d4f6aca528c" \
       local-inference.b12x.commit="1e59a1fd09f782d302b1068b15c8a0bd66103894" \
       local-inference.b12x.tree="f322c804eec1c58a63bd4fe6e7901a95a678a575" \
       local-inference.b12x.rocenante.commit="1a7e3ec286b0ff0b7c2aabee22dce08daab7e011" \

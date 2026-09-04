@@ -58,6 +58,10 @@ def test_immutable_arm64_source_composition() -> None:
         "704aefd743b390af4bd0fb429d1906f9b964c7d8",
     ):
         assert identity in DOCKERFILE
+    assert (
+        'local-inference.vllm.composed.tree="72f7ec613af3af7f4aac46024baa4d4f6aca528c"'
+        in DOCKERFILE
+    )
     assert "CUTE_DSL_ARCH=sm_121a" in DOCKERFILE
     assert "TORCH_CUDA_ARCH_LIST=12.1a" in DOCKERFILE
     assert "CUDA_HOME=/usr/local/cuda" in DOCKERFILE
@@ -197,9 +201,6 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True",
         "HF_HUB_OFFLINE: \"1\"",
         "TRANSFORMERS_OFFLINE: \"1\"",
-        "INSTANTTENSOR_BUFFER_SIZE: \"536870912\"",
-        "INSTANTTENSOR_CONCURRENCY: \"1\"",
-        "INSTANTTENSOR_IO_DEPTH: \"3\"",
         "VLLM_EXL3_ONLINE_TRELLIS_BITS: \"6\"",
         "VLLM_B12X_MLA_CKV_GATHER: \"1\"",
         "VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE: \"1\"",
@@ -216,10 +217,8 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "VLLM_ROCE_ALLGATHER_MAX_SIZE: 16MB",
         "B12X_ROCE_CACHE_DIR: /opt/b12x-roce-cache",
         "--block-size 2048",
-        "--dtype bfloat16",
         "--quantization exl3",
-        "--load-format instanttensor",
-        "--model-loader-extra-config '{\"instanttensor_copy\":false}'",
+        "--load-format safetensors",
         "--attention-backend B12X",
         "--no-enable-flashinfer-autotune",
         "--decode-context-parallel-size {decode_context_parallel}",
@@ -239,6 +238,7 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "PYTHONPATH",
         "CUDA_VISIBLE_DEVICES",
         "SAFETENSORS_FAST_GPU",
+        "INSTANTTENSOR_",
         "VLLM_PLUGINS",
         "VLLM_SSM_CONV_STATE_LAYOUT",
         "B12X_POLICY_MODE",
@@ -247,6 +247,8 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "--block-size 16",
         "--kv-cache-memory-bytes",
         "--mamba-cache-mode",
+        "--model-loader-extra-config",
+        "--dtype ",
         "--gdn-decode-kernel",
         "--linear-backend b12x",
         "--quantization modelopt_mixed",
