@@ -4,7 +4,7 @@ This is a small, independent SparkRun recipe for the locally derived
 `spark-vllm-glm52-exl3:sparkring-switch-prefill-v2` image and the existing
 local model cache. It does not pull an image, download a model, create a fixed
 oversized KV cache, or capture prefill graphs. It enables an experimental MTP3
-path for up to sixteen sequences; prefill and mixed batches stay eager.
+path for up to eight sequences; prefill and mixed batches stay eager.
 
 Build the small overlay once on the head Spark, then stream it to the other
 three nodes (replace the worker names with the management hosts used by the
@@ -28,16 +28,25 @@ uvx sparkrun setup install
 # model and does not alter the existing switched fabric.
 uvx sparkrun setup check
 
+# One-time: install SparkRun's narrowly scoped permission to clear page cache.
+# This prompts for sudo during setup, then the load-window flusher can run
+# non-interactively without granting the serving container host privilege.
+sparkrun setup clear-cache --hosts host1,host2,host3,host4 --save-sudo
+
 # Confirm SparkRun sees the cache root and render the exact launch first.
 sparkrun recipe validate sparkrun-glm53-exl3/recipes/glm53-exl3-4x-safe.yaml
 sparkrun show sparkrun-glm53-exl3/recipes/glm53-exl3-4x-safe.yaml
-sparkrun run sparkrun-glm53-exl3/recipes/glm53-exl3-4x-safe.yaml \
+bash sparkrun-glm53-exl3/scripts/run-with-cache-flusher.sh \
+  sparkrun-glm53-exl3/recipes/glm53-exl3-4x-safe.yaml \
   --hosts host1,host2,host3,host4 --dry-run
 
-# The first host is the head. This starts in the background; Ctrl-C only
-# detaches from log following.
-sparkrun run sparkrun-glm53-exl3/recipes/glm53-exl3-4x-safe.yaml \
-  --hosts host1,host2,host3,host4
+# The first host is the head. The wrapper starts and verifies an unconditional
+# host cache flusher on every node before allowing SparkRun to create a model
+# container. --no-follow returns after dispatch without tying flusher lifecycle
+# to an interactive log-following session.
+bash sparkrun-glm53-exl3/scripts/run-with-cache-flusher.sh \
+  sparkrun-glm53-exl3/recipes/glm53-exl3-4x-safe.yaml \
+  --hosts host1,host2,host3,host4 --no-follow
 ```
 
 Replace `host1` through `host4` with the management hostnames or IPs already
@@ -49,21 +58,20 @@ another copy of the weights.
 
 Before page-cache reclamation, the initialized worker reported only 101.49 GiB
 free out of 121.63 GiB. Immediately clearing the cluster page cache raised the
-same startup reading to about 112.9 GiB. The current 0.89 startup target is
-108.25 GiB, leaving about 4.65 GiB of admission margin after a clean start.
+same startup reading to about 112.9 GiB. The current 0.91 startup target is
+110.68 GiB, leaving about 2.22 GiB of admission margin after a clean start.
 `gpu_memory_utilization` is an allocation budget, not a complete host-RAM
 limit: model loading, graph capture,
 communication buffers, Python processes, and page cache can consume additional
-memory. This recipe fixes the per-node KV pool at 18,000,000,000 bytes. Online
-K6 weight savings are deliberately left as additional UMA headroom during the
-first correctness and memory A/B instead of being immediately reassigned to
-KV. MTP3 verifies four rows per sequence, so
-`FULL_DECODE_ONLY` captures `[4,8,12,...,64]` for one through sixteen
+memory. This recipe lets vLLM profile the remaining memory and size the KV pool;
+record the resulting `GPU KV cache size` from this exact GLM-5.3 build rather
+than copying the 200,064-token number from the older GLM-5.2 QuantTrio recipe.
+MTP3 verifies four rows per sequence, so
+`FULL_DECODE_ONLY` captures `[4,8,12,...,32]` for one through eight
 uniform speculative-decode requests while leaving prefill and mixed batches
 eager. CUDA-graph memory estimation is enabled so KV sizing accounts for graph
-headroom during profiling; the explicit KV pool prevents a conservative graph
-estimate from silently shrinking the cache. The 32 GiB `/dev/shm` setting is
-capacity, not preallocated memory or a container memory limit.
+headroom during profiling. The 32 GiB `/dev/shm` setting is capacity, not
+preallocated memory or a container memory limit.
 
 The 4096-token prefill batch is paired with
 `VLLM_EXL3_PREFILL_CAPACITY=4096`; increasing only the scheduler limit would
@@ -139,24 +147,41 @@ Treat this row as a rejected capacity/graph combination, not as evidence that
 at a time in subsequent runs and retain the first capacity which completes the
 uncached prefill benchmark without NVIDIA allocation errors or earlyoom action.
 
+### Required load-window cache flusher
+
 Do not copy the v1 `mods/drop-caches` field into this native v2 recipe: the
-presence of `mods` selects SparkRun's legacy recipe path. To test whether page
-cache is what prevents 0.85 admission, use the supported cluster operation
-immediately before one controlled launch:
+presence of `mods` selects SparkRun's legacy recipe path. A one-time cache drop
+is also insufficient for this configuration because reading model shards can
+repopulate the cache before CUDA's allocation and admission phases finish.
+
+The launch wrapper uploads `cache_flusher.sh` to each target user's home,
+starts it before SparkRun, and requires every node to report ready. The flusher
+does an immediate cache drop and repeats it unconditionally every 60 seconds.
+It self-expires after 90 minutes so a forgotten process cannot continue
+disrupting normal file-cache behavior indefinitely. Its only privileged action
+is `sudo -n tee /proc/sys/vm/drop_caches`, matching SparkRun's scoped sudo rule.
+This adapts the load-window procedure from the
+[GLM-5.2 QuantTrio deployment](https://github.com/tonyd2wild/GLM-5.2-QuantTrio-200K-4x-DGX-Spark--36tok-s)
+without copying that model's KV geometry or measured token count.
+
+Inspect or stop the fleet-wide flusher explicitly with:
 
 ```bash
-# One-time setup if SparkRun has not saved the required sudo permission:
-sparkrun setup clear-cache --cluster <cluster-name> --save-sudo
+bash sparkrun-glm53-exl3/scripts/cache-flusher-cluster.sh \
+  status host1,host2,host3,host4
 
-# Controlled A/B launch:
-sparkrun setup clear-cache --cluster <cluster-name>
+# Run as soon as the API health check succeeds; do not leave repeated cache
+# drops active during normal serving.
+bash sparkrun-glm53-exl3/scripts/cache-flusher-cluster.sh \
+  stop host1,host2,host3,host4
 ```
 
-Then compare vLLM's `Free memory on device (.../121.63 GiB) on startup` line.
-The 0.89 gate needs about 108.25 GiB free. The measured increase from 101.49 to
+The per-node log is
+`~/.cache/sparkrun/glm53-cache-flusher/flusher.log`. Compare vLLM's
+`Free memory on device (.../121.63 GiB) on startup` line across all ranks. The
+0.91 gate needs about 110.68 GiB free. The measured increase from 101.49 to
 about 112.9 GiB confirms that reclaimable cache—not the sparse-indexer
-workspace—caused the earlier ceiling. Repeat the cache clear before cold
-launches; the fixed 18 GB KV pool assumes that clean-start margin.
+workspace—caused the earlier ceiling.
 
 The recipe intentionally does not set `executor_config.memory_limit`, so
 SparkRun does not add Docker's `--memory` cgroup cap. That cap is not a useful
@@ -182,7 +207,7 @@ only that named stale container with `docker rm -f <container>`. Do this on
 each affected node. Do not use a blanket Docker prune on the DGX Spark.
 
 Confirm the logs report MTP with three speculative tokens, `FULL_DECODE_ONLY`,
-capture sizes through 64, and an 18,000,000,000-byte KV pool. Then record KV
+capture sizes through 32, and the profiled `GPU KV cache size`. Then record KV
 capacity, drafted-token acceptance,
 and generation throughput at concurrency 1 and 8. Capture `sparkrun logs
 glm53-exl3-4x-safe`, `sparkrun status`, host `dmesg`, and `memory.events` on any
@@ -219,3 +244,79 @@ through a normal userspace signal syscall, the trace records its `si_pid` and
 `$HOME/glm53-runtime-diagnostics` from the head and `.runtime-diagnostics`
 from each node's model cache before cleanup. An intentional SparkRun stop will
 also appear in the signal trace.
+
+## R22 EXL3 + MTP3 comparison candidate
+
+The new candidate recipe is
+`recipes/glm53-exl3-dflash2-4x.yaml`. It combines the newer Local Inference
+Lab R22 vLLM/B12X stack with the mixed-K3/K4 EXL3 loader required by
+[davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw).
+For the current comparison it uses the checkpoint's native MTP heads with
+three speculative tokens. The image retains R22's DFlash2 implementation, but
+the recipe deliberately does not load the external draft model.
+
+The published Jovian Judgement R22 container is linux/amd64-only. DGX Spark is
+linux/arm64, so `Dockerfile.r22-dflash2` rebuilds the exact R22 vLLM commit and
+R22 B12X commit on a digest-pinned ARM64 vLLM nightly. It compiles
+the EXL3 extension for `12.1a`/`sm_121a`, verifies all upstream Git trees, and
+fails the build if the six-file EXL3 compatibility composition differs from
+the reviewed tree. This is a source-equivalent ARM64 port, not a claim that the
+x86 image itself supports Spark. The build copies only the already-qualified
+`/opt/sparkring/nccl` switched-fabric runtime from the local
+`sparkring-switch-v1` image, so that prerequisite image must remain present on
+the head node during the build.
+
+This Hugging Face cache root must already exist on every Spark:
+
+```text
+/home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw
+```
+
+Build the image on the head Spark and copy the exact image ID to the other
+three nodes:
+
+```bash
+bash sparkrun-glm53-exl3/scripts/build-r22-dflash2-image.sh host2 host3 host4
+```
+
+Then render and dry-run the launch before starting it through the existing
+load-window cache-flusher wrapper:
+
+```bash
+sparkrun recipe validate \
+  sparkrun-glm53-exl3/recipes/glm53-exl3-dflash2-4x.yaml
+sparkrun show sparkrun-glm53-exl3/recipes/glm53-exl3-dflash2-4x.yaml
+bash sparkrun-glm53-exl3/scripts/run-with-cache-flusher.sh \
+  sparkrun-glm53-exl3/recipes/glm53-exl3-dflash2-4x.yaml \
+  --hosts host1,host2,host3,host4 --dry-run
+bash sparkrun-glm53-exl3/scripts/run-with-cache-flusher.sh \
+  sparkrun-glm53-exl3/recipes/glm53-exl3-dflash2-4x.yaml \
+  --hosts host1,host2,host3,host4 --no-follow
+```
+
+SparkRun validates and identity-mounts only the target model root. The command
+resolves its `refs/main` to the immutable snapshot before starting vLLM. The
+target runs TP4/DCP4 with full-CKV B12X prefill; its native MTP draft also runs
+TP4. MTP3 produces four verification rows per active request, so decode-only
+graphs cover four through 32 rows for the eight-sequence limit. Memory
+utilization is 0.91, matching the established MTP comparison recipe.
+
+The first cold launch creates a separate `.exl3-online-k6-r22` cache. Keep it
+between runs. Do not reuse the old image's `.exl3-online-k6` directory: encoder,
+B12X, and loader identities are part of the cache contract.
+
+Before promoting this candidate, require all of the following:
+
+- all four nodes report the image ID printed by the build script;
+- startup logs identify the V2 runner, EXL3 target, native MTP speculator,
+  three speculative tokens, TP4/DCP4, full-CKV gather, and decode-only graphs;
+- API health, finite-logprob, reasoning, and tool-call smoke tests pass;
+- a long-context generation and a sustained concurrency-8 run complete without
+  worker exit, earlyoom action, CUDA allocation failure, or NCCL timeout;
+- local measurements isolate the R22/EXL3 prefill and runtime changes against
+  the established MTP3 recipe under the same host state.
+
+[R22 and its B12X stack](https://github.com/local-inference-lab/rtx6kpro/blob/master/models/glm-5.3-flash.md)
+have published qualification evidence for the newer execution paths, but not
+for this exact mixed-EXL3 model on four GB10 nodes. Treat those results as
+upstream evidence and keep the established MTP3 recipe as the rollback path.

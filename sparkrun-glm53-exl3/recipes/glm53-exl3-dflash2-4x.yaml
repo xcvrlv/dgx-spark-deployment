@@ -1,0 +1,177 @@
+# R22 comparison recipe for davidsyoung GLM-5.3 EXL3 using the checkpoint's
+# native MTP heads on exactly four DGX Sparks. The R22 image retains DFlash2
+# support, but this recipe deliberately does not load the external draft.
+recipe_version: "2"
+name: glm53-exl3-r22-mtp3-4x
+description: GLM-5.3 mixed-K EXL3 with model-native MTP3 on four SM121 Sparks.
+model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw
+runtime: vllm-distributed
+runtime_config:
+  dashboard: false
+container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v1
+min_nodes: 4
+max_nodes: 4
+
+metadata:
+  model_dtype: exl3-mixed-3.42bpw
+  speculative_method: model-native-mtp3
+  runtime_release: local-inference-lab-r22-jovian-judgement
+  runtime_commit: 70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19
+  b12x_commit: 1e59a1fd09f782d302b1068b15c8a0bd66103894
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 4
+  decode_context_parallel: 4
+  gpu_memory_utilization: 0.895
+  max_model_len: 1048576
+  max_num_seqs: 8
+  max_num_batched_tokens: 4096
+  served_model_name: glm-5.3-exl3-r22-mtp3
+
+env:
+  LD_PRELOAD: /usr/local/cuda/compat/libcuda.so.1:/opt/sparkring/nccl/libnccl.so.2
+  VLLM_NCCL_SO_PATH: /opt/sparkring/nccl/libnccl.so.2
+  CUDA_HOME: /usr/local/cuda
+  TRITON_PTXAS_PATH: /usr/local/cuda/bin/ptxas
+  VLLM_USE_V2_MODEL_RUNNER: "1"
+  VLLM_WORKER_MULTIPROC_METHOD: spawn
+  CUTE_DSL_ARCH: sm_121a
+  TORCH_CUDA_ARCH_LIST: 12.1a
+  CUDA_DEVICE_MAX_CONNECTIONS: "32"
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  NCCL_NET: IB
+  NCCL_NVLS_ENABLE: "0"
+  NCCL_MAX_NCHANNELS: "4"
+  NCCL_MIN_NCHANNELS: "4"
+  NCCL_CROSS_NIC: "1"
+  NCCL_IB_MERGE_NICS: "0"
+  NCCL_IB_SUBNET_AWARE_ROUTING: "1"
+  NCCL_IB_GID_INDEX: "3"
+  NCCL_IGNORE_CPU_AFFINITY: "1"
+  OMP_NUM_THREADS: "8"
+  OPENBLAS_NUM_THREADS: "8"
+  MKL_NUM_THREADS: "8"
+  NUMEXPR_NUM_THREADS: "8"
+  RAYON_NUM_THREADS: "8"
+  TOKENIZERS_PARALLELISM: "false"
+  MALLOC_ARENA_MAX: "2"
+
+  # InstantTensor streams the local checkpoint without a second full model
+  # copy. A 512 MiB buffer is intentionally retained on unified-memory Sparks;
+  # the proposed 1.25 GiB buffer buys startup headroom at the cost of serving RAM.
+  INSTANTTENSOR_BACKEND: BUFFERED
+  INSTANTTENSOR_BUFFER_SIZE: "536870912"
+  INSTANTTENSOR_CHUNK_SIZE: "2097152"
+  INSTANTTENSOR_CONCURRENCY: "1"
+  INSTANTTENSOR_IO_DEPTH: "3"
+  INSTANTTENSOR_MAX_FREE_MEM_USAGE: "0.05"
+  INSTANTTENSOR_COPY: "0"
+
+  # The checkpoint's routed experts are mixed K3/K4. Its BF16 dense/shared
+  # expert projections are converted once to K6 and cached beside the model.
+  VLLM_EXL3_EXT_PATH: /opt/exllamav3
+  VLLM_EXL3_ENCODER_SOURCE: /opt/exllamav3-python/exllamav3
+  VLLM_EXL3_ENCODER_REVISION: 704aefd743b390af4bd0fb429d1906f9b964c7d8
+  VLLM_EXL3_ONLINE_TRELLIS_BITS: "6"
+  VLLM_EXL3_ONLINE_CACHE_MODE: readwrite
+  VLLM_EXL3_ONLINE_CACHE_DIR: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw/.exl3-online-k6-r22
+  VLLM_EXL3_PREFILL_CAPACITY: "4096"
+  VLLM_EXL3_TRELLIS_MIN_M: "1"
+  VLLM_EXL3_TRELLIS_MAX_M: "64"
+  VLLM_EXL3_TRELLIS_BLOCK_M: "8"
+  VLLM_EXL3_PREFILL_TRELLIS: "1"
+  VLLM_EXL3_PREFILL_BLOCK_M: "32"
+  VLLM_EXL3_PREFILL_CHUNK: "128"
+
+  # R22 full-CKV DCP prefill. Target attention and the model-native MTP draft
+  # are sharded over all four nodes.
+  VLLM_B12X_MLA_CKV_GATHER: "1"
+  VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS: "16"
+  VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS: "524288"
+  VLLM_DCP_Q_REPLICATE: "1"
+  VLLM_USE_DIRECT_DCP_A2A: "0"
+  VLLM_USE_DIRECT_DCP_Q_GATHER: "0"
+  VLLM_USE_DIRECT_DCP_KV_GATHER: "0"
+  VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE: "1"
+  VLLM_DCP_GLOBAL_TOPK: "1"
+  VLLM_DCP_SHARD_DRAFT: "1"
+  VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "256"
+  VLLM_MTP_INSTRUMENT: "1"
+  VLLM_MTP_INSTRUMENT_WINDOW: "32"
+
+  # Keep the first SM121 qualification on the known W4A16 activation path.
+  B12X_W4A16_TC_DECODE: "1"
+  VLLM_USE_B12X_SPARSE_INDEXER: "1"
+  VLLM_USE_AOT_COMPILE: "1"
+  VLLM_USE_MEGA_AOT_ARTIFACT: "1"
+  # SparkRing provides inter-node NCCL/RDMA. B12X PCIe all-reduce is a
+  # single-host path and must not be selected for this TP4 deployment.
+  VLLM_ENABLE_PCIE_ALLREDUCE: "0"
+  VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
+  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
+
+executor: docker
+executor_config:
+  auto_remove: false
+  entrypoint: ""
+  gpu_access_mode: gpus
+  ipc: host
+  network: host
+  shm_size: 32gb
+  ulimit:
+    - memlock=-1:-1
+    - nofile=1048576:1048576
+  devices:
+    - /dev/infiniband:/dev/infiniband
+
+command: |
+  set -euo pipefail
+  unset NCCL_GRAPH_FILE VLLM_PREFIX_CACHE_RETENTION_INTERVAL
+  model_root="{model}"
+  resolve_snapshot() {
+    root="$1"
+    revision="$(cat "$root/refs/main")"
+    path="$root/snapshots/$revision"
+    test -r "$path/config.json"
+    printf '%s' "$path"
+  }
+  model_path="$(resolve_snapshot "$model_root")"
+  mkdir -p "$model_root/.exl3-online-k6-r22"
+  test -w "$model_root/.exl3-online-k6-r22"
+  exec vllm serve "$model_path" \
+    --served-model-name {served_model_name} \
+    --host {host} --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --distributed-executor-backend mp \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --block-size 2048 \
+    --dtype bfloat16 \
+    --quantization exl3 \
+    --quantization-config '{"linear":{"weight":"mxfp8"},"shared_experts":{"weight":"mxfp8"},"ignore":["re:.*\\.fused_qkv_a_proj$","re:.*\\.q_a_proj$","re:.*kv_a_proj_with_mqa","re:.*\\.mlp\\.gate$","model.layers.78.eh_proj","lm_head"]}' \
+    --load-format instanttensor \
+    --model-loader-extra-config '{"instanttensor_copy":false}' \
+    --attention-backend B12X_MLA_SPARSE \
+    --moe-backend b12x \
+    --disable-custom-all-reduce \
+    --no-enable-flashinfer-autotune \
+    --kv-cache-dtype fp8 \
+    --decode-context-parallel-size {decode_context_parallel} \
+    --dcp-comm-backend ag_rs \
+    --dcp-kv-cache-interleave-size 1 \
+    --enable-chunked-prefill \
+    --enable-prefix-caching \
+    --async-scheduling \
+    --reasoning-parser glm45 \
+    --tool-call-parser glm47 \
+    --enable-auto-tool-choice \
+    --generation-config vllm \
+    --hf-overrides '{"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
+    --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":3,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X_MLA_SPARSE\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
+    --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'

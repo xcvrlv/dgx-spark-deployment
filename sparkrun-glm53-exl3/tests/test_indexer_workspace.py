@@ -172,8 +172,9 @@ def test_recipe_and_image_wiring() -> None:
     assert "container: spark-vllm-glm52-exl3:sparkring-switch-prefill-v2" in recipe
     assert "GLM53_INDEXER_WORKSPACE: rightsize" in recipe
     assert 'VLLM_EXL3_PREFILL_CAPACITY: "4096"' in recipe
-    assert "kv_cache_memory_bytes: 18000000000" in recipe
-    assert "--kv-cache-memory-bytes {kv_cache_memory_bytes}" in recipe
+    assert "gpu_memory_utilization: 0.91" in recipe
+    assert "kv_cache_memory_bytes:" not in recipe
+    assert "--kv-cache-memory-bytes" not in recipe
     assert "docker save" in builder and "docker load" in builder
 
 

@@ -1,0 +1,130 @@
+# syntax=docker/dockerfile:1.7
+# ARM64/SM121 source composition of Local Inference Lab R22 plus the R7 EXL3
+# loader required by davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw.
+ARG SPARKRING_FABRIC_IMAGE=spark-vllm-glm52-exl3:sparkring-switch-v1
+FROM ${SPARKRING_FABRIC_IMAGE} AS sparkring-fabric
+
+FROM vllm/vllm-openai:nightly-aarch64@sha256:a551e05307cd2e0092139d84db32af9c97e67d2eeeff072d21e429131d8c23f0
+
+ARG SPARKRING_FABRIC_IMAGE
+ARG SPARKRING_FABRIC_IMAGE_ID
+ARG VLLM_R22_COMMIT=70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19
+ARG VLLM_R22_TREE=89481110674c08be1759a9222c525a0be14ad52a
+ARG VLLM_EXL3_COMMIT=3c0a496caf9339f396b0be8da6910b1887920709
+ARG VLLM_COMPOSED_TREE=c7345580eb4e4753420ebae812f5ec12a442c95a
+ARG B12X_R22_COMMIT=1e59a1fd09f782d302b1068b15c8a0bd66103894
+ARG B12X_R22_TREE=f322c804eec1c58a63bd4fe6e7901a95a678a575
+ARG EXLLAMAV3_COMMIT=704aefd743b390af4bd0fb429d1906f9b964c7d8
+ARG MAX_JOBS=8
+
+ENV TORCH_CUDA_ARCH_LIST=12.1a \
+    CUTE_DSL_ARCH=sm_121a \
+    CMAKE_CUDA_ARCHITECTURES=121 \
+    FLASHINFER_CUDA_ARCH_LIST=12.1f \
+    CUDA_HOME=/usr/local/cuda \
+    TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas \
+    MAX_JOBS=${MAX_JOBS} \
+    NVCC_THREADS=1 \
+    VLLM_TARGET_DEVICE=cuda \
+    VLLM_USE_PRECOMPILED=0 \
+    VLLM_EXL3_EXT_PATH=/opt/exllamav3 \
+    VLLM_EXL3_ENCODER_SOURCE=/opt/exllamav3-python/exllamav3 \
+    VLLM_EXL3_ENCODER_REVISION=704aefd743b390af4bd0fb429d1906f9b964c7d8
+
+USER root
+
+# Preserve the cluster's already-qualified switched-fabric NCCL build. The
+# official ARM64 nightly does not define this SparkRing-specific path, while
+# the recipe deliberately preloads it on every node.
+COPY --from=sparkring-fabric /opt/sparkring/nccl /opt/sparkring/nccl
+RUN test -n "${SPARKRING_FABRIC_IMAGE_ID}" \
+    && test -r /opt/sparkring/nccl/libnccl.so.2 \
+    && test -r /usr/local/cuda/compat/libcuda.so.1 \
+    && test -x /usr/local/cuda/bin/ptxas
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential cmake git ninja-build pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/local-inference-lab/vllm.git /opt/vllm-r22 \
+    && git -C /opt/vllm-r22 checkout --detach "${VLLM_R22_COMMIT}" \
+    && test "$(git -C /opt/vllm-r22 rev-parse 'HEAD^{tree}')" = "${VLLM_R22_TREE}" \
+    && git -C /opt/vllm-r22 restore --source="${VLLM_EXL3_COMMIT}" -- \
+      vllm/model_executor/layers/quantization/exl3.py \
+      vllm/model_executor/layers/quantization/exl3_online_cache.py
+
+COPY overlay/patch_r22_exl3.py /opt/compose/patch_r22_exl3.py
+COPY overlay/smoke_r22_image.py /opt/compose/smoke_r22_image.py
+
+# The patch verifies the immutable R22 commit and both restored EXL3 blobs.
+# Staging only the six composed files gives the whole source tree a reproducible
+# identity and makes any accidental overlay drift fail the image build.
+RUN python3 /opt/compose/patch_r22_exl3.py /opt/vllm-r22 \
+    && python3 /opt/compose/patch_r22_exl3.py /opt/vllm-r22 --check \
+    && git -C /opt/vllm-r22 diff --check \
+    && git -C /opt/vllm-r22 add \
+      vllm/config/quantization.py \
+      vllm/model_executor/layers/quantization/__init__.py \
+      vllm/model_executor/layers/quantization/exl3.py \
+      vllm/model_executor/layers/quantization/exl3_online_cache.py \
+      vllm/model_executor/model_loader/utils.py \
+      vllm/model_executor/warmup/kernel_warmup.py \
+    && test "$(git -C /opt/vllm-r22 write-tree)" = "${VLLM_COMPOSED_TREE}"
+
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/local-inference-lab/b12x.git /opt/b12x-r22 \
+    && git -C /opt/b12x-r22 checkout --detach "${B12X_R22_COMMIT}" \
+    && test "$(git -C /opt/b12x-r22 rev-parse 'HEAD^{tree}')" = "${B12X_R22_TREE}"
+
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/brandonmmusic-max/exllamav3.git /opt/exllamav3-python \
+    && git -C /opt/exllamav3-python checkout --detach "${EXLLAMAV3_COMMIT}" \
+    && cd /opt/exllamav3-python \
+    && python3 setup.py build_ext --inplace \
+    && install -d /opt/exllamav3 \
+    && extension="$(find . -maxdepth 1 -type f -name 'exllamav3_ext*.so' -print -quit)" \
+    && test -n "${extension}" \
+    && install -m 0755 "${extension}" /opt/exllamav3/
+
+# The pinned ARM64 nightly supplies the CUDA 13/PyTorch dependency set. Refuse
+# to silently resolve a different Torch or CUTLASS stack while composing R22.
+RUN python3 - <<'PY'
+from importlib.metadata import PackageNotFoundError, version
+from packaging.version import Version
+
+minimums = {"instanttensor": "0.1.9"}
+for package, minimum in minimums.items():
+    try:
+        installed = version(package)
+    except PackageNotFoundError as exc:
+        raise SystemExit(f"pinned base is missing {package}") from exc
+    assert Version(installed) >= Version(minimum), (package, installed, minimum)
+torch_version = Version(version("torch"))
+assert torch_version.release[:2] == (2, 13), torch_version
+assert version("nvidia-cutlass-dsl") == "4.6.2"
+print("Pinned ARM64 base dependency contract is compatible with R22")
+PY
+
+RUN if [ -f /opt/vllm-r22/use_existing_torch.py ]; then \
+      python3 /opt/vllm-r22/use_existing_torch.py; \
+    fi \
+    && python3 -m pip uninstall -y b12x vllm \
+    && python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
+      /opt/b12x-r22 \
+    && python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
+      /opt/vllm-r22
+
+RUN python3 /opt/compose/smoke_r22_image.py
+
+LABEL org.opencontainers.image.title="GLM-5.3 EXL3 + DFlash2 R22 SM121 vLLM" \
+      org.opencontainers.image.description="ARM64 DGX Spark source composition of Local Inference Lab R22 and R7 EXL3" \
+      local-inference.vllm.commit="70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19" \
+      local-inference.vllm.tree="89481110674c08be1759a9222c525a0be14ad52a" \
+      local-inference.vllm.composed.tree="c7345580eb4e4753420ebae812f5ec12a442c95a" \
+      local-inference.b12x.commit="1e59a1fd09f782d302b1068b15c8a0bd66103894" \
+      local-inference.b12x.tree="f322c804eec1c58a63bd4fe6e7901a95a678a575" \
+      local-inference.exllamav3.commit="704aefd743b390af4bd0fb429d1906f9b964c7d8" \
+      sparkring.fabric.source="${SPARKRING_FABRIC_IMAGE}" \
+      sparkring.fabric.image.id="${SPARKRING_FABRIC_IMAGE_ID}"
