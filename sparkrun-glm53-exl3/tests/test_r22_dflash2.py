@@ -50,7 +50,7 @@ def test_immutable_arm64_source_composition() -> None:
         "70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19",
         "89481110674c08be1759a9222c525a0be14ad52a",
         "3c0a496caf9339f396b0be8da6910b1887920709",
-        "72f7ec613af3af7f4aac46024baa4d4f6aca528c",
+        "4b09ec40fd81eaf68edd382cc8a216baaa14d14d",
         "1e59a1fd09f782d302b1068b15c8a0bd66103894",
         "f322c804eec1c58a63bd4fe6e7901a95a678a575",
         "1a7e3ec286b0ff0b7c2aabee22dce08daab7e011",
@@ -59,7 +59,7 @@ def test_immutable_arm64_source_composition() -> None:
     ):
         assert identity in DOCKERFILE
     assert (
-        'local-inference.vllm.composed.tree="72f7ec613af3af7f4aac46024baa4d4f6aca528c"'
+        'local-inference.vllm.composed.tree="4b09ec40fd81eaf68edd382cc8a216baaa14d14d"'
         in DOCKERFILE
     )
     assert "CUTE_DSL_ARCH=sm_121a" in DOCKERFILE
@@ -169,6 +169,10 @@ def test_exl3_overlay_is_fail_closed_and_uses_r22_b12x_abi() -> None:
     assert "_GLM_DSA_FP8_CACHE_RECORD_BYTES = 656" in source
     assert "else _GLM_DSA_FP8_CACHE_RECORD_BYTES" in source
     assert "vllm/v1/attention/backends/mla/b12x_mla_sparse.py" in DOCKERFILE
+    assert "patch_rank_sliced_exl3_loaders(root)" in source
+    assert "normalize_rank_sliced_weight_name" in source
+    assert "vllm/model_executor/models/deepseek_mtp.py" in DOCKERFILE
+    assert "vllm/models/deepseek_v32/nvidia/model.py" in DOCKERFILE
     assert "CMakeLists.txt" in DOCKERFILE
     assert "vllm/config/model.py" in DOCKERFILE
 
@@ -190,7 +194,7 @@ def test_four_spark_mtp3_runtime_contract() -> None:
     assert "LD_PRELOAD: /usr/local/cuda/compat/libcuda.so.1" not in RECIPE
     required = (
         "name: glm53-exl3-r22-mtp3-4x",
-        "container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v4",
+        "container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v5",
         "min_nodes: 4",
         "max_nodes: 4",
         "tensor_parallel: 4",
@@ -217,7 +221,7 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "VLLM_ROCE_ALLREDUCE_MAX_SIZE: 2MB",
         "VLLM_ROCE_ALLGATHER_MAX_SIZE: 16MB",
         "B12X_ROCE_CACHE_DIR: /opt/b12x-roce-cache",
-        "--block-size 2048",
+        "--block-size 64",
         "--quantization exl3",
         "--load-format safetensors",
         "import torch, exllamav3_ext",
@@ -273,7 +277,7 @@ def test_cluster_image_distribution_is_identity_checked() -> None:
     assert "remote_id=" in BUILDER and 'test "$remote_id" = "$local_id"' in BUILDER
     assert BUILDER.count('test "$remote_platform" = "linux/arm64"') == 1
     assert BUILDER.count("/opt/compose/smoke_r22_image.py --gpu") == 2
-    assert "r22-dflash2-sm121-v4" in BUILDER
+    assert "r22-dflash2-sm121-v5" in BUILDER
 
 
 def test_gpu_smoke_exercises_sm121_and_cuda_graph_replay() -> None:

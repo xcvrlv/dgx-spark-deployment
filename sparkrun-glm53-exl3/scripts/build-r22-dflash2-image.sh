@@ -11,7 +11,7 @@ test "$(uname -m)" = "aarch64"
 
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 context="$root_dir/sparkrun-glm53-exl3"
-image="${GLM53_R22_IMAGE:-spark-vllm-glm53-exl3:r22-dflash2-sm121-v4}"
+image="${GLM53_R22_IMAGE:-spark-vllm-glm53-exl3:r22-dflash2-sm121-v5}"
 fabric_base="spark-vllm-glm52-exl3:sparkring-switch-v1"
 
 docker image inspect "$fabric_base" >/dev/null

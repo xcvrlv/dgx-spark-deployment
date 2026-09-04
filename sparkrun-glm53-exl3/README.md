@@ -268,7 +268,7 @@ The published Jovian Judgement R22 container is linux/amd64-only. DGX Spark is
 linux/arm64, so `Dockerfile.r22-dflash2` rebuilds the exact R22 vLLM commit and
 R22 B12X commit on a digest-pinned ARM64 vLLM nightly. It compiles
 the EXL3 extension for `12.1a`/`sm_121a`, verifies all upstream Git trees, and
-fails the build if the six-file EXL3 compatibility composition differs from
+fails the build if the reviewed EXL3 compatibility composition differs from
 the reviewed tree. This is a source-equivalent ARM64 port, not a claim that the
 x86 image itself supports Spark. The build copies only the already-qualified
 `/opt/sparkring/nccl` switched-fabric runtime from the local

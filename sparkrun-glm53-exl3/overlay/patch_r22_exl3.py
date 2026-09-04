@@ -170,6 +170,66 @@ def patch_b12x_glm_dsa_fp8_abi(root: Path) -> None:
     )
 
 
+def patch_rank_sliced_exl3_loaders(root: Path) -> None:
+    target_path = root / "vllm/models/deepseek_v32/nvidia/model.py"
+    replace_once(
+        target_path,
+        "        quant_config = vllm_config.quant_config\n"
+        "        self.config = config\n",
+        "        quant_config = vllm_config.quant_config\n"
+        "        self.config = config\n"
+        "        self.quant_config = quant_config\n",
+    )
+    replace_once(
+        target_path,
+        "        params_dict = dict(self.named_parameters())\n"
+        "        loaded_params: set[str] = set()\n"
+        "        _pending_wk_fp8: dict = {}\n"
+        "        for name, loaded_weight in weights:\n"
+        "            if \"rotary_emb.inv_freq\" in name:\n",
+        "        params_dict = dict(self.named_parameters())\n"
+        "        loaded_params: set[str] = set()\n"
+        "        _pending_wk_fp8: dict = {}\n"
+        "        rank_sliced_name = getattr(\n"
+        "            self.quant_config,\n"
+        '            "normalize_rank_sliced_weight_name",\n'
+        "            None,\n"
+        "        )\n"
+        "        for name, loaded_weight in weights:\n"
+        "            if rank_sliced_name is not None:\n"
+        "                name = rank_sliced_name(name)\n"
+        "                if name is None:\n"
+        "                    continue\n"
+        "            if \"rotary_emb.inv_freq\" in name:\n",
+    )
+
+    mtp_path = root / "vllm/model_executor/models/deepseek_mtp.py"
+    replace_once(
+        mtp_path,
+        "        params_dict = dict(self.named_parameters())\n"
+        "        loaded_params: set[str] = set()\n"
+        "        _pending_wk_fp8: dict = {}  # FP8 indexer wk dequant buffer\n"
+        "        for name, loaded_weight in weights:\n"
+        "            if \"rotary_emb.inv_freq\" in name:\n",
+        "        params_dict = dict(self.named_parameters())\n"
+        "        loaded_params: set[str] = set()\n"
+        "        _pending_wk_fp8: dict = {}  # FP8 indexer wk dequant buffer\n"
+        "        # Match the target EXL3 loader: discard non-local serialized TP\n"
+        "        # payloads and strip the rank segment before expert mapping.\n"
+        "        rank_sliced_name = getattr(\n"
+        "            self.quant_config,\n"
+        '            "normalize_rank_sliced_weight_name",\n'
+        "            None,\n"
+        "        )\n"
+        "        for name, loaded_weight in weights:\n"
+        "            if rank_sliced_name is not None:\n"
+        "                name = rank_sliced_name(name)\n"
+        "                if name is None:\n"
+        "                    continue\n"
+        "            if \"rotary_emb.inv_freq\" in name:\n",
+    )
+
+
 def patch_quant_overlay(root: Path) -> None:
     path = root / "vllm/config/quantization.py"
     replace_once(
@@ -441,6 +501,16 @@ def verify_patched(root: Path) -> None:
             "else _GLM_DSA_FP8_CACHE_RECORD_BYTES",
             "self._model_type = int(module.ModelType.GLM_NSA)",
         ),
+        "vllm/models/deepseek_v32/nvidia/model.py": (
+            "self.quant_config = quant_config",
+            '"normalize_rank_sliced_weight_name"',
+            "name = rank_sliced_name(name)",
+        ),
+        "vllm/model_executor/models/deepseek_mtp.py": (
+            "Match the target EXL3 loader",
+            '"normalize_rank_sliced_weight_name"',
+            "name = rank_sliced_name(name)",
+        ),
         "vllm/model_executor/layers/quantization/__init__.py": (
             '"exl3": Exl3Config',
         ),
@@ -474,6 +544,8 @@ def verify_patched(root: Path) -> None:
         "vllm/model_executor/layers/quantization/exl3_online_cache.py",
         "vllm/config/quantization.py",
         "vllm/v1/attention/backends/mla/b12x_mla_sparse.py",
+        "vllm/models/deepseek_v32/nvidia/model.py",
+        "vllm/model_executor/models/deepseek_mtp.py",
     ):
         py_compile.compile(str(root / relative), doraise=True)
 
@@ -494,6 +566,7 @@ def main() -> None:
     patch_quant_override_order(root)
     patch_sm121_flashmla_build(root)
     patch_b12x_glm_dsa_fp8_abi(root)
+    patch_rank_sliced_exl3_loaders(root)
     patch_quant_overlay(root)
     patch_exl3_backend(root)
     patch_ballast_release(root)
