@@ -43,8 +43,17 @@ RUN test -n "${SPARKRING_FABRIC_IMAGE_ID}" \
     && test -x /usr/local/cuda/bin/ptxas
 
 RUN apt-get update \
+    && cuda_version_dash="$(nvcc --version | sed -nE 's/.*release ([0-9]+)\.([0-9]+).*/\1-\2/p')" \
+    && test -n "${cuda_version_dash}" \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential cmake git ninja-build pkg-config \
+      "libcublas-dev-${cuda_version_dash}" \
+      "libcurand-dev-${cuda_version_dash}" \
+      "libcusolver-dev-${cuda_version_dash}" \
+      "libcusparse-dev-${cuda_version_dash}" \
+    && test -r /usr/local/cuda/include/cublas_v2.h \
+    && test -r /usr/local/cuda/include/cusolverDn.h \
+    && test -r /usr/local/cuda/include/cusparse.h \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --filter=blob:none --no-checkout \
@@ -56,6 +65,7 @@ RUN git clone --filter=blob:none --no-checkout \
       vllm/model_executor/layers/quantization/exl3_online_cache.py
 
 COPY overlay/patch_r22_exl3.py /opt/compose/patch_r22_exl3.py
+COPY overlay/patch_exllamav3_aarch64.py /opt/compose/patch_exllamav3_aarch64.py
 COPY overlay/smoke_r22_image.py /opt/compose/smoke_r22_image.py
 
 # The patch verifies the immutable R22 commit and both restored EXL3 blobs.
@@ -81,6 +91,8 @@ RUN git clone --filter=blob:none --no-checkout \
 RUN git clone --filter=blob:none --no-checkout \
       https://github.com/brandonmmusic-max/exllamav3.git /opt/exllamav3-python \
     && git -C /opt/exllamav3-python checkout --detach "${EXLLAMAV3_COMMIT}" \
+    && python3 /opt/compose/patch_exllamav3_aarch64.py /opt/exllamav3-python \
+    && python3 /opt/compose/patch_exllamav3_aarch64.py /opt/exllamav3-python --check \
     && cd /opt/exllamav3-python \
     && python3 setup.py build_ext --inplace \
     && install -d /opt/exllamav3 \

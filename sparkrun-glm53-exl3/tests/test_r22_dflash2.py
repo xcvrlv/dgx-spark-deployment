@@ -13,6 +13,7 @@ DOCKERFILE = (ROOT / "Dockerfile.r22-dflash2").read_text(encoding="utf-8")
 RECIPE = (ROOT / "recipes/glm53-exl3-dflash2-4x.yaml").read_text(encoding="utf-8")
 BUILDER = (ROOT / "scripts/build-r22-dflash2-image.sh").read_text(encoding="utf-8")
 PATCH_PATH = ROOT / "overlay/patch_r22_exl3.py"
+EXLLAMA_ARM_PATCH_PATH = ROOT / "overlay/patch_exllamav3_aarch64.py"
 SMOKE_PATH = ROOT / "overlay/smoke_r22_image.py"
 
 SPEC = importlib.util.spec_from_file_location("patch_r22_exl3", PATCH_PATH)
@@ -44,6 +45,14 @@ def test_immutable_arm64_source_composition() -> None:
     assert "CUDA_HOME=/usr/local/cuda" in DOCKERFILE
     assert "TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas" in DOCKERFILE
     assert "test -x /usr/local/cuda/bin/ptxas" in DOCKERFILE
+    for package in (
+        "libcublas-dev-${cuda_version_dash}",
+        "libcurand-dev-${cuda_version_dash}",
+        "libcusolver-dev-${cuda_version_dash}",
+        "libcusparse-dev-${cuda_version_dash}",
+    ):
+        assert package in DOCKERFILE
+    assert "test -r /usr/local/cuda/include/cusparse.h" in DOCKERFILE
     assert "COPY --from=sparkring-fabric /opt/sparkring/nccl" in DOCKERFILE
     assert 'test -n "${SPARKRING_FABRIC_IMAGE_ID}"' in DOCKERFILE
     assert "test -r /opt/sparkring/nccl/libnccl.so.2" in DOCKERFILE
@@ -54,6 +63,16 @@ def test_immutable_arm64_source_composition() -> None:
     assert "torch_version.release[:2] == (2, 13)" in DOCKERFILE
     assert "nvidia-cutlass-dsl\") == \"4.6.2\"" in DOCKERFILE
     assert "vllm-openai:jovian-judgement" not in DOCKERFILE
+
+
+def test_exllamav3_build_has_aarch64_cpu_probe_compatibility() -> None:
+    source = EXLLAMA_ARM_PATCH_PATH.read_text(encoding="utf-8")
+    assert '"avx2_target.cpp"' in source
+    assert '"avx512_target.cpp"' in source
+    assert "#if defined(__aarch64__)" in source
+    assert 'f"{signature} {{ return false; }}"' in source
+    assert "COPY overlay/patch_exllamav3_aarch64.py" in DOCKERFILE
+    assert "patch_exllamav3_aarch64.py /opt/exllamav3-python --check" in DOCKERFILE
 
 
 def test_exl3_overlay_is_fail_closed_and_uses_r22_b12x_abi() -> None:
@@ -88,7 +107,7 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "max_nodes: 4",
         "tensor_parallel: 4",
         "decode_context_parallel: 4",
-        "gpu_memory_utilization: 0.91",
+        "gpu_memory_utilization: 0.895",
         "VLLM_USE_V2_MODEL_RUNNER: \"1\"",
         "VLLM_WORKER_MULTIPROC_METHOD: spawn",
         "PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True",
