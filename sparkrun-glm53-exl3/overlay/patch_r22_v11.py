@@ -12,11 +12,11 @@ import re
 from pathlib import Path
 
 VERSION = "glm53-r22-v11-1"
-INPUT_HASHES = {'moe/_shared/kernels/w4a16/kernel.py': '06ca851da11c9c1047098279d8dca29fcace24feb940c81aa98cd5b07ce17f34',
+INPUT_HASHES = {'moe/_shared/kernels/w4a16/kernel.py': '591d06f211229703fc465f745db87241675d4b70fbcbb7af96c3d203642567c8',
  'moe/_shared/kernels/w4a16/mixed_trellis.py': '4d5140de84e3dde5875ff75ad95c9a62b6041b5dde2e69f0fb96562319aabd78',
  'comm/roce/_allgather_cute.py': 'a6dd608f01d3bf837e1bcb517f7e925b19cda533590263d17bb22feccd1572a4',
  'comm/roce/roce_oneshot.py': 'a555e83c0ae6ac99d27c14706f92966d4f5fbd213d682cbd3819cd174926288e'}
-OUTPUT_HASHES = {'moe/_shared/kernels/w4a16/kernel.py': '5822016cf6f9a4c976267e3d1541b0bbac965e28e510274af6f9bbec669be25d',
+OUTPUT_HASHES = {'moe/_shared/kernels/w4a16/kernel.py': '21ff268a1db2d56360727073ae4d9d28a61add0813de5ebdf27581991f8a4ea3',
  'moe/_shared/kernels/w4a16/mixed_trellis.py': '80927912114bba31e03656fcc53815157bb41774be386bf613c75e49ecea14d1',
  'comm/roce/_allgather_cute.py': '1453250675988ffbaf009b1cf8ff97b960e5667abc9791d42d92a7ede294428a',
  'comm/roce/roce_oneshot.py': '92a32ed7ad570f54228998da10dc8dd463a042458c2bbd6beec521d1668344d4'}

@@ -1,6 +1,7 @@
 """CPU tests against the pinned B12X fixture; no CUDA imports required."""
 import ast
 import dataclasses
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -38,6 +39,18 @@ class V11Tests(unittest.TestCase):
             raise unittest.SkipTest("set GLM53_V11_BASELINE to the pinned v10 B12X package")
         cls.sources = {name: transform((BASE / name).read_text(encoding="utf-8"))
                        for name, transform in overlay.TRANSFORMS.items()}
+
+    def test_kernel_fixture_matches_upstream_git_blob(self):
+        # Independent of the overlay's SHA256 constants: a Windows-default
+        # decode/re-encode previously corrupted comments in both the fixture
+        # and its expected hashes, allowing the self-consistent tests to pass.
+        source = (BASE / "moe/_shared/kernels/w4a16/kernel.py").read_text(encoding="utf-8")
+        raw = source.encode("utf-8")
+        blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+        # b12x commit 1e59a1fd09f782d302b1068b15c8a0bd66103894
+        self.assertEqual(blob, "537ce1c7b75514a4f26988cf1b928452debe5059")
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         "591d06f211229703fc465f745db87241675d4b70fbcbb7af96c3d203642567c8")
 
     def test_hashes_idempotence_and_preflight(self):
         with tempfile.TemporaryDirectory() as tmp:

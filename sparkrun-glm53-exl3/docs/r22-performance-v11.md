@@ -101,8 +101,16 @@ scratch lifetime assumptions, and size-dependent RoCE synchronization. The
 numerical intent is unchanged, but end-to-end acceptance and speed remain
 unverified. There is no claimed PR77-sized mixed-K speedup.
 
-CPU validation: five v11 tests cover hash/idempotence/preflight behavior, actual
+CPU validation: six v11 tests cover hash/idempotence/preflight behavior, actual
 compiler-function dtype/cache handling, both tier callers and RoCE counter/grid
-selection, plus the separate build/recipe GPU gates. The existing seven v10 tests and nine recipe/image tests also pass.
+selection, plus the separate build/recipe GPU gates. The seven v10 performance
+tests also pass. The recipe/image suite currently stops at its expected memory
+utilization of 0.895 because the recipe now specifies 0.89; this is unrelated
+to the v11 hash correction.
 Set `GLM53_V11_BASELINE` to the pinned composed-v10 B12X package to run the v11
 source tests outside this checkout's ignored research fixture directory.
+
+Build correction: the kernel input/output hashes were regenerated with explicit
+UTF-8 decoding. The original Windows fixture had encoding-corrupted comments;
+the image's `591d06f2...` input hash was correct. A separate upstream Git-blob
+check now guards against a fixture and its hashes sharing the same corruption.
