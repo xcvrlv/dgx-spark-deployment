@@ -1,0 +1,20 @@
+# Build Dockerfile.r22-dflash2 as v10 first; this layer preserves its rollback.
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v10
+
+COPY overlay/patch_r22_v11.py /opt/compose/patch_r22_v11.py
+COPY overlay/smoke_r22_v11.py /opt/compose/smoke_r22_v11.py
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+import b12x
+sys.path.insert(0, "/opt/compose")
+from patch_r22_v11 import patch
+for root in (Path("/opt/b12x-r22/b12x"), Path(b12x.__file__).parent):
+    patch(root)
+    patch(root, check=True)
+PY
+
+# Read once when mixed-K launch plans are prepared, never on graph replay.
+ENV VLLM_EXL3_MIXED_FUSED_OUTPUT=1
+LABEL local-inference.v11-overlay="glm53-r22-v11-1" \
+      local-inference.b12x.rocenante.backport="b58f34eaf978277621efced6678e6713fd7122e4"

@@ -2,13 +2,13 @@
 # native MTP heads on exactly four DGX Sparks. The R22 image retains DFlash2
 # support, but this recipe deliberately does not load the external draft.
 recipe_version: "2"
-name: glm53-exl3-r22-mtp3-4x
+name: glm53-exl3-r22-v11-mtp3-4x
 description: GLM-5.3 mixed-K EXL3 with model-native MTP3 on four SM121 Sparks.
 model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw
 runtime: vllm-distributed
 runtime_config:
   dashboard: false
-container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v10
+container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v11
 min_nodes: 4
 max_nodes: 4
 
@@ -20,19 +20,24 @@ metadata:
   b12x_commit: 1e59a1fd09f782d302b1068b15c8a0bd66103894
   b12x_rocenante_commit: 1a7e3ec286b0ff0b7c2aabee22dce08daab7e011
   performance_overlay: glm53-r22-performance-v1
+  v11_overlay: glm53-r22-v11-1
+  b12x_rocenante_backport: b58f34eaf978277621efced6678e6713fd7122e4
 
 defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 4
   decode_context_parallel: 4
-  gpu_memory_utilization: 0.89
+  gpu_memory_utilization: 0.895
   max_model_len: 1048576
   max_num_seqs: 8
   max_num_batched_tokens: 4096
   served_model_name: glm-5.3-exl3-r22-mtp3
 
 env:
+  # v11: final mixed-K store narrows after FP32 router accumulation.
+  # Set to 0 and restart all workers for an output-fusion A/B test.
+  VLLM_EXL3_MIXED_FUSED_OUTPUT: "1"
   # Let NVIDIA Container Toolkit mount the Spark host's matching libcuda.
   # Preloading the image's forward-compat driver causes CUDA error 803.
   LD_PRELOAD: /opt/sparkring/nccl/libnccl.so.2

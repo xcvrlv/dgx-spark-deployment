@@ -210,7 +210,7 @@ def test_four_spark_mtp3_runtime_contract() -> None:
     assert "LD_PRELOAD: /usr/local/cuda/compat/libcuda.so.1" not in RECIPE
     required = (
         "name: glm53-exl3-r22-mtp3-4x",
-        "container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v9",
+        "container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v10",
         "min_nodes: 4",
         "max_nodes: 4",
         "tensor_parallel: 4",
@@ -234,6 +234,8 @@ def test_four_spark_mtp3_runtime_contract() -> None:
         "B12X_ROCE_HCA: rocep1s0f0,roceP2p1s0f0",
         "B12X_ROCE_GID_INDEX: \"3\"",
         "VLLM_ENABLE_ROCE_ALLREDUCE: \"1\"",
+        "VLLM_ROCE_DCP_ENABLE: \"1\"",
+        "VLLM_ROCE_DCP_RS_MAX_BYTES: \"262144\"",
         "VLLM_ROCE_ALLREDUCE_MAX_SIZE: 2MB",
         "VLLM_ROCE_ALLGATHER_MAX_SIZE: 16MB",
         "B12X_ROCE_CACHE_DIR: /opt/b12x-roce-cache",
@@ -293,7 +295,7 @@ def test_cluster_image_distribution_is_identity_checked() -> None:
     assert "remote_id=" in BUILDER and 'test "$remote_id" = "$local_id"' in BUILDER
     assert BUILDER.count('test "$remote_platform" = "linux/arm64"') == 1
     assert BUILDER.count("/opt/compose/smoke_r22_image.py --gpu") == 2
-    assert "r22-dflash2-sm121-v9" in BUILDER
+    assert "r22-dflash2-sm121-v10" in BUILDER
 
 
 def test_gpu_smoke_exercises_sm121_and_cuda_graph_replay() -> None:

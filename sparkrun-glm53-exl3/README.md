@@ -308,14 +308,17 @@ resolves its `refs/main` to the immutable snapshot before starting vLLM. The
 target runs TP4/DCP4 with full-CKV B12X prefill; its native MTP draft also runs
 TP4. MTP3 produces four verification rows per active request, so decode-only
 graphs cover four through 32 rows for the eight-sequence limit. Memory
-utilization is 0.91, matching the established MTP comparison recipe.
+utilization is 0.895; the safe recipe uses 0.91.
 
 The first cold launch creates a separate `.exl3-online-k6-r22` cache. Keep it
 between runs. Do not reuse the old image's `.exl3-online-k6` directory: encoder,
 B12X, and loader identities are part of the cache contract.
 
-The v9 image keeps mixed-Trellis route-pack warmup under PyTorch inference
-mode. This matches the lifetime of the persistent route workspace created by
+The v10 image adds a hash-pinned Python performance overlay after the compiled
+v9 runtime. It enables GLM-DSA full-CKV prefill, extends RoCEnante to the DCP
+communicator, and routes small DCP reductions through all-reduce plus a local
+head slice. It keeps the existing mixed-Trellis route-pack warmup under
+PyTorch inference mode. This matches the lifetime of the persistent route workspace created by
 the earlier profile pass and permits its in-place reset during final kernel
 warmup.
 
@@ -341,6 +344,9 @@ Before promoting this candidate, require all of the following:
 - startup logs identify the V2 runner, EXL3 target, native MTP speculator,
   three speculative tokens, TP4/DCP4, full-CKV gather, decode-only graphs, and
   `B12X_ROCENANTE` in the TP communicator's backend list;
+- the v10 performance smoke passes on every node; eligible prefill logs
+  `Using full-CKV gather for GLM-DSA B12X DCP prefill`, and the DCP communicator
+  also lists `B12X_ROCENANTE`;
 - API health, finite-logprob, reasoning, and tool-call smoke tests pass;
 - a long-context generation and a sustained concurrency-8 run complete without
   worker exit, earlyoom action, CUDA allocation failure, or NCCL timeout;
@@ -351,3 +357,17 @@ Before promoting this candidate, require all of the following:
 have published qualification evidence for the newer execution paths, but not
 for this exact mixed-EXL3 model on four GB10 nodes. Treat those results as
 upstream evidence and keep the established MTP3 recipe as the rollback path.
+
+See [v10 performance changes and qualification](docs/r22-performance-v10.md)
+for the exact changes, independent rollback switches, and the optional
+four-node RoCEnante graph-replay check. GPU correctness and speed are not
+established by the local CPU tests; the build script runs the new single-GPU
+attention comparison on each Spark before reporting success.
+
+The experimental **v11** candidate adds mixed-K final-output fusion and the
+newer RoCEnante small-gather optimization. Build with
+`bash sparkrun-glm53-exl3/scripts/build-r22-v11-image.sh WORKER1 WORKER2 WORKER3`
+from the repository root, then use `recipes/glm53-exl3-v11-4x.yaml`.
+The v10 image and recipe remain available for rollback. See
+[v11 findings, validation and A/B instructions](docs/r22-performance-v11.md).
+Performance and end-to-end MTP acceptance still require Spark measurements.
