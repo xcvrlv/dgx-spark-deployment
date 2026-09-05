@@ -256,6 +256,129 @@ def patch_rank_sliced_exl3_loaders(root: Path) -> None:
     )
 
 
+# Backport vLLM 2cf82bcdd17f658486c280b0acd23274f60bdf00, which fixes
+# NVIDIA DeepSeek-V3.2 / GLM-5.x query handling under decode context parallelism.
+def patch_nvidia_dcp_attention(root: Path) -> None:
+    attention_path = root / "vllm/models/deepseek_v32/attention.py"
+    replace_once(
+        attention_path,
+        "        if self.use_pcp and self.impl.dcp_world_size > self.impl.pcp_world_size:\n"
+        "            if isinstance(mqa_q_arg, tuple):\n"
+        "                mqa_q_arg = torch.cat(mqa_q_arg, dim=-1)\n"
+        "            mqa_q_arg = get_tp_group().all_gather(mqa_q_arg, dim=1)\n"
+        "        attn_out, lse = self.impl.forward_mqa(  # type: ignore[attr-defined]\n"
+        "            mqa_q_arg, kv_cache, attn_metadata, self\n"
+        "        )\n"
+        "\n"
+        "        if self.use_pcp and self.impl.dcp_world_size > 1:\n"
+        "            assert lse is not None and self.dcp_manager is not None\n"
+        "            seq_lens = (\n"
+        "                attn_metadata.decode.seq_lens\n"
+        "                if attn_metadata.decode is not None\n"
+        "                else cast(torch.Tensor, attn_metadata.seq_lens)[  # type: ignore[attr-defined]\n"
+        "                    : attn_metadata.num_decodes\n"
+        "                ]\n"
+        "            )\n"
+        "            query_start_loc = attn_metadata.query_start_loc[\n"
+        "                : attn_metadata.num_decodes + 1\n"
+        "            ]\n"
+        "            attn_out = self.dcp_manager.combine(\n"
+        "                attn_out,\n"
+        "                lse,\n"
+        "                seq_lens=seq_lens,\n"
+        "                query_start_loc=query_start_loc,\n"
+        "            )\n"
+        "            attn_out = finalize_mla_pcp_decode(attn_out, self.num_heads)\n",
+        "        if self.use_pcp and self.impl.dcp_world_size > self.impl.pcp_world_size:\n"
+        "            if isinstance(mqa_q_arg, tuple):\n"
+        "                mqa_q_arg = torch.cat(mqa_q_arg, dim=-1)\n"
+        "            mqa_q_arg = get_tp_group().all_gather(mqa_q_arg, dim=1)\n"
+        "        elif not self.use_pcp and self.impl.dcp_world_size > 1:\n"
+        "            assert self.dcp_manager is not None\n"
+        "            if isinstance(mqa_q_arg, tuple):\n"
+        "                mqa_q_arg = torch.cat(mqa_q_arg, dim=-1)\n"
+        "            assert self.dcp_manager.query_gather is not None\n"
+        "            mqa_q_arg = self.dcp_manager.query_gather(mqa_q_arg)\n"
+        "        attn_out, lse = self.impl.forward_mqa(  # type: ignore[attr-defined]\n"
+        "            mqa_q_arg, kv_cache, attn_metadata, self\n"
+        "        )\n"
+        "\n"
+        "        if self.impl.dcp_world_size > 1:\n"
+        "            assert lse is not None and self.dcp_manager is not None\n"
+        "            seq_lens: torch.Tensor | None\n"
+        "            query_start_loc: torch.Tensor | None\n"
+        "            if self.use_pcp:\n"
+        "                if attn_metadata.decode is not None:\n"
+        "                    seq_lens = attn_metadata.decode.seq_lens\n"
+        "                else:\n"
+        "                    all_seq_lens = cast(\n"
+        "                        torch.Tensor,\n"
+        "                        attn_metadata.seq_lens,  # type: ignore[attr-defined]\n"
+        "                    )\n"
+        "                    seq_lens = all_seq_lens[: attn_metadata.num_decodes]\n"
+        "                query_start_loc = attn_metadata.query_start_loc[\n"
+        "                    : attn_metadata.num_decodes + 1\n"
+        "                ]\n"
+        "            else:\n"
+        "                # The backend emits (0, -inf) for empty local shards, so no\n"
+        "                # PCP-only empty-shard metadata is needed.\n"
+        "                seq_lens = None\n"
+        "                query_start_loc = None\n"
+        "            attn_out = self.dcp_manager.combine(\n"
+        "                attn_out,\n"
+        "                lse,\n"
+        "                seq_lens=seq_lens,  # type: ignore[arg-type]\n"
+        "                query_start_loc=query_start_loc,  # type: ignore[arg-type]\n"
+        "            )\n"
+        "            if self.use_pcp:\n"
+        "                attn_out = finalize_mla_pcp_decode(attn_out, self.num_heads)\n",
+    )
+
+    kernels_path = root / "vllm/models/deepseek_v32/common/kernels.py"
+    replace_once(
+        kernels_path,
+        "    if slot_mapping_ptr is None:\n"
+        "        if kv_out_ptr is None and kpe_out_ptr is None and index_k_out_ptr is None:\n"
+        "            return\n"
+        "    elif tl.load(slot_mapping_ptr + tok_idx) < 0:\n"
+        "        # Padding\n"
+        "        return\n"
+        "\n"
+        "    if pid == 2:\n"
+        "        # Q RMS norm\n"
+        "        q_block = tl.arange(0, Q_BLOCK_SIZE)\n"
+        "        q_mask = q_block < Q_DIM\n"
+        "        q_c = tl.load(q_c_ptr + tok_idx * q_c_stride + q_block, mask=q_mask, other=0.0)\n"
+        "        q_c_rms_w = tl.load(q_rms_norm_w_ptr + q_block, mask=q_mask)\n"
+        "        q_c = _rms_norm(q_c, q_c_rms_w, q_rms_eps, Q_DIM)\n"
+        "        tl.store(q_c_out_ptr + tok_idx * q_c_out_stride + q_block, q_c, mask=q_mask)\n"
+        "    elif pid == 1:\n",
+        "    if pid == 2:\n"
+        "        # Q RMS norm. Runs for every row: under DCP a negative slot only\n"
+        "        # means another rank owns this token's KV slot, but the query is\n"
+        "        # still needed on every rank (queries are not sharded), so the\n"
+        "        # slot-based skip below must not gate it. Padding rows do harmless\n"
+        "        # row-local extra work (no position load, no cache write).\n"
+        "        q_block = tl.arange(0, Q_BLOCK_SIZE)\n"
+        "        q_mask = q_block < Q_DIM\n"
+        "        q_c = tl.load(q_c_ptr + tok_idx * q_c_stride + q_block, mask=q_mask, other=0.0)\n"
+        "        q_c_rms_w = tl.load(q_rms_norm_w_ptr + q_block, mask=q_mask)\n"
+        "        q_c = _rms_norm(q_c, q_c_rms_w, q_rms_eps, Q_DIM)\n"
+        "        tl.store(q_c_out_ptr + tok_idx * q_c_out_stride + q_block, q_c, mask=q_mask)\n"
+        "        return\n"
+        "\n"
+        "    if slot_mapping_ptr is None:\n"
+        "        if kv_out_ptr is None and kpe_out_ptr is None and index_k_out_ptr is None:\n"
+        "            return\n"
+        "    elif tl.load(slot_mapping_ptr + tok_idx) < 0:\n"
+        "        # Padding, or (under DCP) a token whose KV slot another rank owns:\n"
+        "        # skip the K-side norms and cache writes.\n"
+        "        return\n"
+        "\n"
+        "    if pid == 1:\n",
+    )
+
+
 def patch_quant_overlay(root: Path) -> None:
     path = root / "vllm/config/quantization.py"
     replace_once(
@@ -542,6 +665,15 @@ def verify_patched(root: Path) -> None:
             '"normalize_rank_sliced_weight_name"',
             "name = rank_sliced_name(name)",
         ),
+        "vllm/models/deepseek_v32/attention.py": (
+            "elif not self.use_pcp and self.impl.dcp_world_size > 1:",
+            "mqa_q_arg = self.dcp_manager.query_gather(mqa_q_arg)",
+            "if self.impl.dcp_world_size > 1:",
+        ),
+        "vllm/models/deepseek_v32/common/kernels.py": (
+            "Q RMS norm. Runs for every row",
+            "a token whose KV slot another rank owns",
+        ),
         "vllm/model_executor/layers/quantization/__init__.py": (
             '"exl3": Exl3Config',
         ),
@@ -577,6 +709,8 @@ def verify_patched(root: Path) -> None:
         "vllm/v1/attention/backends/mla/b12x_mla_sparse.py",
         "vllm/models/deepseek_v32/nvidia/model.py",
         "vllm/models/deepseek_v32/nvidia/mtp.py",
+        "vllm/models/deepseek_v32/attention.py",
+        "vllm/models/deepseek_v32/common/kernels.py",
         "vllm/model_executor/models/deepseek_mtp.py",
     ):
         py_compile.compile(str(root / relative), doraise=True)
@@ -599,6 +733,7 @@ def main() -> None:
     patch_sm121_flashmla_build(root)
     patch_b12x_glm_dsa_fp8_abi(root)
     patch_rank_sliced_exl3_loaders(root)
+    patch_nvidia_dcp_attention(root)
     patch_quant_overlay(root)
     patch_exl3_backend(root)
     patch_ballast_release(root)

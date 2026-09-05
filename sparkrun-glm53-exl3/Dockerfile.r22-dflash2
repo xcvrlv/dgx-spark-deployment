@@ -11,7 +11,7 @@ ARG SPARKRING_FABRIC_IMAGE_ID
 ARG VLLM_R22_COMMIT=70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19
 ARG VLLM_R22_TREE=89481110674c08be1759a9222c525a0be14ad52a
 ARG VLLM_EXL3_COMMIT=3c0a496caf9339f396b0be8da6910b1887920709
-ARG VLLM_COMPOSED_TREE=c33c28f4a692ab0de01b9f5c28b0165d02e277b4
+ARG VLLM_COMPOSED_TREE=1c02d95c3d5294d9ee4b43875e3d7e84c3739c0a
 ARG B12X_R22_COMMIT=1e59a1fd09f782d302b1068b15c8a0bd66103894
 ARG B12X_R22_TREE=f322c804eec1c58a63bd4fe6e7901a95a678a575
 ARG B12X_ROCENANTE_COMMIT=1a7e3ec286b0ff0b7c2aabee22dce08daab7e011
@@ -95,7 +95,7 @@ COPY overlay/patch_exllamav3_aarch64.py /opt/compose/patch_exllamav3_aarch64.py
 COPY overlay/smoke_r22_image.py /opt/compose/smoke_r22_image.py
 
 # The patch verifies the immutable R22 commit and both restored EXL3 blobs.
-# Staging only the twelve composed files gives the whole source tree a reproducible
+# Staging only the fourteen composed files gives the whole source tree a reproducible
 # identity and makes any accidental overlay drift fail the image build.
 RUN python3 /opt/compose/patch_r22_exl3.py /opt/vllm-r22 \
     && python3 /opt/compose/patch_r22_exl3.py /opt/vllm-r22 --check \
@@ -109,6 +109,8 @@ RUN python3 /opt/compose/patch_r22_exl3.py /opt/vllm-r22 \
       vllm/model_executor/layers/quantization/exl3_online_cache.py \
       vllm/model_executor/model_loader/utils.py \
       vllm/model_executor/models/deepseek_mtp.py \
+      vllm/models/deepseek_v32/attention.py \
+      vllm/models/deepseek_v32/common/kernels.py \
       vllm/models/deepseek_v32/nvidia/model.py \
       vllm/models/deepseek_v32/nvidia/mtp.py \
       vllm/v1/attention/backends/mla/b12x_mla_sparse.py \
@@ -208,7 +210,7 @@ LABEL org.opencontainers.image.title="GLM-5.3 EXL3 + DFlash2 R22 SM121 vLLM" \
       org.opencontainers.image.description="ARM64 DGX Spark R22/R7 EXL3 composition with dual-rail RoCEnante" \
       local-inference.vllm.commit="70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19" \
       local-inference.vllm.tree="89481110674c08be1759a9222c525a0be14ad52a" \
-      local-inference.vllm.composed.tree="c33c28f4a692ab0de01b9f5c28b0165d02e277b4" \
+      local-inference.vllm.composed.tree="1c02d95c3d5294d9ee4b43875e3d7e84c3739c0a" \
       local-inference.b12x.commit="1e59a1fd09f782d302b1068b15c8a0bd66103894" \
       local-inference.b12x.tree="f322c804eec1c58a63bd4fe6e7901a95a678a575" \
       local-inference.b12x.rocenante.commit="1a7e3ec286b0ff0b7c2aabee22dce08daab7e011" \
