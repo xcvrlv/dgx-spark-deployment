@@ -56,6 +56,8 @@ def test_immutable_arm64_source_composition() -> None:
         "1a7e3ec286b0ff0b7c2aabee22dce08daab7e011",
         "f1729d4e7f5b4f1867bcbe8283eac167132a04b5",
         "704aefd743b390af4bd0fb429d1906f9b964c7d8",
+        "e74319e3405ce6d71965732880f5dc1f52371f64",
+        "7c522b19e1341e36c63c86bbd664981dda49cd5e",
     ):
         assert identity in DOCKERFILE
     assert (
@@ -107,6 +109,11 @@ def test_immutable_arm64_source_composition() -> None:
     assert 'sparkring.fabric.image.id="${SPARKRING_FABRIC_IMAGE_ID}"' in DOCKERFILE
     assert "torch_version.release[:2] == (2, 13)" in DOCKERFILE
     assert "nvidia-cutlass-dsl\") == \"4.6.2\"" in DOCKERFILE
+    assert "QUTLASS_SRC_DIR=/opt/qutlass-r22" in DOCKERFILE
+    assert "https://github.com/IST-DASLab/qutlass.git /opt/qutlass-r22" in DOCKERFILE
+    assert "git -C /opt/qutlass-r22 rev-parse 'HEAD^{tree}'" in DOCKERFILE
+    assert "test ! -r /opt/qutlass-r22/third_party/cutlass" in DOCKERFILE
+    assert "submodule update" not in DOCKERFILE
     assert "vllm-openai:jovian-judgement" not in DOCKERFILE
 
 

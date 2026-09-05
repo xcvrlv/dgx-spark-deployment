@@ -17,6 +17,8 @@ ARG B12X_R22_TREE=f322c804eec1c58a63bd4fe6e7901a95a678a575
 ARG B12X_ROCENANTE_COMMIT=1a7e3ec286b0ff0b7c2aabee22dce08daab7e011
 ARG B12X_COMPOSED_TREE=f1729d4e7f5b4f1867bcbe8283eac167132a04b5
 ARG EXLLAMAV3_COMMIT=704aefd743b390af4bd0fb429d1906f9b964c7d8
+ARG QUTLASS_COMMIT=e74319e3405ce6d71965732880f5dc1f52371f64
+ARG QUTLASS_TREE=7c522b19e1341e36c63c86bbd664981dda49cd5e
 ARG MAX_JOBS=8
 
 ENV TORCH_CUDA_ARCH_LIST=12.1a \
@@ -172,13 +174,26 @@ RUN cuda_version_dash="$(nvcc --version | sed -nE 's/.*release ([0-9]+)\.([0-9]+
     && test -e /usr/local/cuda/lib64/libnvrtc.so \
     && rm -rf /var/lib/apt/lists/*
 
+# QUTLASS otherwise performs a second recursive NVIDIA CUTLASS clone from
+# inside pip's wheel build. Supply its exact source tree without initializing
+# the vendored CUTLASS submodule; vLLM already resolves the pinned CUTLASS
+# headers and qutlass.cmake prefers those include directories. Keep this late
+# so a dependency-network retry preserves the expensive preceding build cache.
+RUN git clone --filter=blob:none --no-checkout \
+      https://github.com/IST-DASLab/qutlass.git /opt/qutlass-r22 \
+    && git -C /opt/qutlass-r22 checkout --detach "${QUTLASS_COMMIT}" \
+    && test "$(git -C /opt/qutlass-r22 rev-parse 'HEAD^{tree}')" = "${QUTLASS_TREE}" \
+    && test -r /opt/qutlass-r22/qutlass/csrc/bindings.cpp \
+    && test ! -r /opt/qutlass-r22/third_party/cutlass/include/cutlass/cutlass.h
+
 RUN if [ -f /opt/vllm-r22/use_existing_torch.py ]; then \
       python3 /opt/vllm-r22/use_existing_torch.py; \
     fi \
     && python3 -m pip uninstall -y b12x vllm \
     && python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
       /opt/b12x-r22 \
-    && python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
+    && QUTLASS_SRC_DIR=/opt/qutlass-r22 \
+      python3 -m pip install --no-cache-dir --no-build-isolation --no-deps \
       /opt/vllm-r22
 
 # RoCEnante's posting proxy is plain C over libibverbs. Build and load it now
@@ -216,5 +231,7 @@ LABEL org.opencontainers.image.title="GLM-5.3 EXL3 + DFlash2 R22 SM121 vLLM" \
       local-inference.b12x.rocenante.commit="1a7e3ec286b0ff0b7c2aabee22dce08daab7e011" \
       local-inference.b12x.composed.tree="f1729d4e7f5b4f1867bcbe8283eac167132a04b5" \
       local-inference.exllamav3.commit="704aefd743b390af4bd0fb429d1906f9b964c7d8" \
+      local-inference.qutlass.commit="e74319e3405ce6d71965732880f5dc1f52371f64" \
+      local-inference.qutlass.tree="7c522b19e1341e36c63c86bbd664981dda49cd5e" \
       sparkring.fabric.source="${SPARKRING_FABRIC_IMAGE}" \
       sparkring.fabric.image.id="${SPARKRING_FABRIC_IMAGE_ID}"

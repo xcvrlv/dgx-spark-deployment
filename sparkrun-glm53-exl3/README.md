@@ -319,6 +319,11 @@ mode. This matches the lifetime of the persistent route workspace created by
 the earlier profile pass and permits its in-place reset during final kernel
 warmup.
 
+Its build also supplies the pinned QUTLASS source through `QUTLASS_SRC_DIR`.
+This prevents QUTLASS from starting a redundant recursive CUTLASS submodule
+clone inside the vLLM wheel build; it uses vLLM's already-resolved CUTLASS
+headers instead.
+
 This comparison recipe uses vLLM's ordinary safetensors loader. InstantTensor's
 zero-copy ring-buffer mode was removed after it segfaulted before loading the
 first tensor on the four-Spark mixed-EXL3 path. The recipe also leaves `--dtype`
