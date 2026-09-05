@@ -11,7 +11,7 @@ ARG SPARKRING_FABRIC_IMAGE_ID
 ARG VLLM_R22_COMMIT=70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19
 ARG VLLM_R22_TREE=89481110674c08be1759a9222c525a0be14ad52a
 ARG VLLM_EXL3_COMMIT=3c0a496caf9339f396b0be8da6910b1887920709
-ARG VLLM_COMPOSED_TREE=1c02d95c3d5294d9ee4b43875e3d7e84c3739c0a
+ARG VLLM_COMPOSED_TREE=803c857e70a85a6f8b7c75d50a0a3644e8620651
 ARG B12X_R22_COMMIT=1e59a1fd09f782d302b1068b15c8a0bd66103894
 ARG B12X_R22_TREE=f322c804eec1c58a63bd4fe6e7901a95a678a575
 ARG B12X_ROCENANTE_COMMIT=1a7e3ec286b0ff0b7c2aabee22dce08daab7e011
@@ -210,7 +210,7 @@ LABEL org.opencontainers.image.title="GLM-5.3 EXL3 + DFlash2 R22 SM121 vLLM" \
       org.opencontainers.image.description="ARM64 DGX Spark R22/R7 EXL3 composition with dual-rail RoCEnante" \
       local-inference.vllm.commit="70b3c1c7f1c76fcf0847fcbb4a0b8b5583b78d19" \
       local-inference.vllm.tree="89481110674c08be1759a9222c525a0be14ad52a" \
-      local-inference.vllm.composed.tree="1c02d95c3d5294d9ee4b43875e3d7e84c3739c0a" \
+      local-inference.vllm.composed.tree="803c857e70a85a6f8b7c75d50a0a3644e8620651" \
       local-inference.b12x.commit="1e59a1fd09f782d302b1068b15c8a0bd66103894" \
       local-inference.b12x.tree="f322c804eec1c58a63bd4fe6e7901a95a678a575" \
       local-inference.b12x.rocenante.commit="1a7e3ec286b0ff0b7c2aabee22dce08daab7e011" \

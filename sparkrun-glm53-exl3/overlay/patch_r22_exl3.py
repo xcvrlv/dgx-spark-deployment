@@ -498,6 +498,36 @@ def patch_exl3_backend(root: Path) -> None:
         "    )\n\n\n"
         "logger = init_logger(__name__)\n",
     )
+    replace_once(
+        path,
+        "def _b12x_trellis_c_tmp_elements(rows: int, columns: int) -> int:\n"
+        "    \"\"\"Return graph-safe dense-W4A16 scratch capacity for one static shape.\"\"\"\n"
+        "\n"
+        "    rows = int(rows)\n"
+        "    columns = int(columns)\n"
+        "    if rows <= 128:\n"
+        "        # The cooperative K6 small-M kernel does not consume W4A16 scratch.\n"
+        "        return 1\n"
+        "    padded_rows = max(\n"
+        "        ((rows + 47) // 48) * 48,\n"
+        "        ((rows + 63) // 64) * 64,\n"
+        "    )\n"
+        "    return min(columns * padded_rows, _B12X_TRELLIS_C_TMP_CAP)\n",
+        "def _b12x_trellis_c_tmp_elements(rows: int, columns: int) -> int:\n"
+        "    \"\"\"Return graph-safe R22 dense-W4A16 scratch capacity.\"\"\"\n"
+        "\n"
+        "    rows = int(rows)\n"
+        "    columns = int(columns)\n"
+        "    # R22's dense Trellis runner uses the packed W4A16 launch for every\n"
+        "    # M, including CUDA-graph decode shapes at or below 128 rows. Size\n"
+        "    # for either launch-time M tile (48 or 64) instead of assuming the\n"
+        "    # separate cooperative small-M path will consume no scratch.\n"
+        "    padded_rows = max(\n"
+        "        ((rows + 47) // 48) * 48,\n"
+        "        ((rows + 63) // 64) * 64,\n"
+        "    )\n"
+        "    return min(columns * padded_rows, _B12X_TRELLIS_C_TMP_CAP)\n",
+    )
 
     start = path.read_text(encoding="utf-8").index("def _load_b12x_mixed_trellis()")
     text = path.read_text(encoding="utf-8")
@@ -688,6 +718,8 @@ def verify_patched(root: Path) -> None:
             "def run_mixed_trellis3(",
             "module.bind_mixed_trellis3(",
             'kwargs["w13_layout"] = "trellis_t256_proj"',
+            "Return graph-safe R22 dense-W4A16 scratch capacity",
+            "including CUDA-graph decode shapes at or below 128 rows",
         ),
         "vllm/model_executor/model_loader/utils.py": (
             "EXL3 R7 ballast release skipped",

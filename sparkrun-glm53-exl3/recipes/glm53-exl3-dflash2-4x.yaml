@@ -8,7 +8,7 @@ model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3
 runtime: vllm-distributed
 runtime_config:
   dashboard: false
-container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v7
+container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v8
 min_nodes: 4
 max_nodes: 4
 
