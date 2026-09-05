@@ -643,6 +643,14 @@ def patch_ballast_release(root: Path) -> None:
 
 
 def patch_warmup(root: Path) -> None:
+    exl3_path = root / "vllm/model_executor/layers/quantization/exl3.py"
+    replace_once(
+        exl3_path,
+        "\ndef warmup_exl3_mixed_trellis_route_pack(model: torch.nn.Module) -> int:\n",
+        "\n@torch.inference_mode()\n"
+        "def warmup_exl3_mixed_trellis_route_pack(model: torch.nn.Module) -> int:\n",
+    )
+
     path = root / "vllm/model_executor/warmup/kernel_warmup.py"
     replace_once(
         path,
@@ -720,6 +728,8 @@ def verify_patched(root: Path) -> None:
             'kwargs["w13_layout"] = "trellis_t256_proj"',
             "Return graph-safe R22 dense-W4A16 scratch capacity",
             "including CUDA-graph decode shapes at or below 128 rows",
+            "@torch.inference_mode()\n"
+            "def warmup_exl3_mixed_trellis_route_pack",
         ),
         "vllm/model_executor/model_loader/utils.py": (
             "EXL3 R7 ballast release skipped",

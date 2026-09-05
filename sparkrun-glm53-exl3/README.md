@@ -314,6 +314,11 @@ The first cold launch creates a separate `.exl3-online-k6-r22` cache. Keep it
 between runs. Do not reuse the old image's `.exl3-online-k6` directory: encoder,
 B12X, and loader identities are part of the cache contract.
 
+The v9 image keeps mixed-Trellis route-pack warmup under PyTorch inference
+mode. This matches the lifetime of the persistent route workspace created by
+the earlier profile pass and permits its in-place reset during final kernel
+warmup.
+
 This comparison recipe uses vLLM's ordinary safetensors loader. InstantTensor's
 zero-copy ring-buffer mode was removed after it segfaulted before loading the
 first tensor on the four-Spark mixed-EXL3 path. The recipe also leaves `--dtype`
