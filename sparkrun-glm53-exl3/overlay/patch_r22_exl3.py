@@ -229,6 +229,32 @@ def patch_rank_sliced_exl3_loaders(root: Path) -> None:
         "            if \"rotary_emb.inv_freq\" in name:\n",
     )
 
+    nvidia_mtp_path = root / "vllm/models/deepseek_v32/nvidia/mtp.py"
+    replace_once(
+        nvidia_mtp_path,
+        "        params_dict = dict(self.named_parameters())\n"
+        "        loaded_params: set[str] = set()\n"
+        "        _pending_wk_fp8: dict = {}\n"
+        "        for name, loaded_weight in weights:\n"
+        "            if \"rotary_emb.inv_freq\" in name:\n",
+        "        params_dict = dict(self.named_parameters())\n"
+        "        loaded_params: set[str] = set()\n"
+        "        _pending_wk_fp8: dict = {}\n"
+        "        # Rank-sliced EXL3 names must be normalized before the NVIDIA\n"
+        "        # MTP loader rewrites layer and expert parameter names.\n"
+        "        rank_sliced_name = getattr(\n"
+        "            self.quant_config,\n"
+        '            "normalize_rank_sliced_weight_name",\n'
+        "            None,\n"
+        "        )\n"
+        "        for name, loaded_weight in weights:\n"
+        "            if rank_sliced_name is not None:\n"
+        "                name = rank_sliced_name(name)\n"
+        "                if name is None:\n"
+        "                    continue\n"
+        "            if \"rotary_emb.inv_freq\" in name:\n",
+    )
+
 
 def patch_quant_overlay(root: Path) -> None:
     path = root / "vllm/config/quantization.py"
@@ -511,6 +537,11 @@ def verify_patched(root: Path) -> None:
             '"normalize_rank_sliced_weight_name"',
             "name = rank_sliced_name(name)",
         ),
+        "vllm/models/deepseek_v32/nvidia/mtp.py": (
+            "Rank-sliced EXL3 names must be normalized",
+            '"normalize_rank_sliced_weight_name"',
+            "name = rank_sliced_name(name)",
+        ),
         "vllm/model_executor/layers/quantization/__init__.py": (
             '"exl3": Exl3Config',
         ),
@@ -545,6 +576,7 @@ def verify_patched(root: Path) -> None:
         "vllm/config/quantization.py",
         "vllm/v1/attention/backends/mla/b12x_mla_sparse.py",
         "vllm/models/deepseek_v32/nvidia/model.py",
+        "vllm/models/deepseek_v32/nvidia/mtp.py",
         "vllm/model_executor/models/deepseek_mtp.py",
     ):
         py_compile.compile(str(root / relative), doraise=True)
