@@ -1,0 +1,27 @@
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v15
+
+COPY overlay/patch_r22_v16.py overlay/gb10_dcp.py overlay/smoke_r22_v16.py overlay/probe_r22_v16_proxy.c /opt/compose/
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+import b12x
+import vllm
+sys.path.insert(0, "/opt/compose")
+from patch_r22_v16 import patch
+for b, v in ((Path("/opt/b12x-r22/b12x"), Path("/opt/vllm-r22/vllm")),
+             (Path(b12x.__file__).parent, Path(vllm.__file__).parent)):
+    patch(b, v)
+    patch(b, v, check=True)
+PY
+
+RUN cc -O2 /opt/compose/probe_r22_v16_proxy.c \
+    -I/opt/b12x-r22/b12x/comm/roce -libverbs -lpthread -o /opt/compose/probe_r22_v16_proxy \
+    && /opt/compose/probe_r22_v16_proxy
+
+ENV VLLM_GB10_DCP_GATHER_INTO=1 \
+    VLLM_GB10_CKV_INPLACE=1 \
+    VLLM_GB10_DCP_MERGE_ROWS=256 \
+    B12X_ROCE_LAZY_PAYLOAD_INIT=1 \
+    B12X_ROCE_SKIP_EMPTY_CQ=1
+RUN python3 /opt/compose/smoke_r22_v16.py
+LABEL local-inference.v16-overlay="glm53-r22-v16-1"

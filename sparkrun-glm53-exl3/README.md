@@ -386,3 +386,17 @@ inherited numerical checks. GPU memory utilization remains **0.87**.
 Build with `bash sparkrun-glm53-exl3/scripts/build-r22-v14-image.sh WORKER1 WORKER2 WORKER3`
 and use `recipes/glm53-exl3-v14-4x.yaml`. See
 [v14 changes, validation limits and fallback switches](docs/r22-performance-v14.md).
+
+The **v15** candidate adds compact mixed-K input rotations, SM121 skinny BF16
+projection profiles, a corrected sigmoid reciprocal, and two switched-RoCE
+proxy optimizations. Build with
+`bash sparkrun-glm53-exl3/scripts/build-r22-v15-image.sh WORKER1 WORKER2 WORKER3`
+and use `recipes/glm53-exl3-v15-4x.yaml`. See
+[v15 changes and independent fallback switches](docs/r22-performance-v15.md).
+
+The **v16** candidate routes eligible CKV gathers through RoCEnante, reuses
+bounded DCP indexer merge buffers, removes separate CKV staging, and reduces
+proxy polling and startup memory writes. Build with
+`bash sparkrun-glm53-exl3/scripts/build-r22-v16-image.sh WORKER1 WORKER2 WORKER3`
+and use `recipes/glm53-exl3-v16-4x.yaml`. Memory utilization stays **0.87**.
+See [v16 memory accounting, validation and rollback switches](docs/r22-performance-v16.md).

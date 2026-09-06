@@ -1,0 +1,24 @@
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v14
+
+COPY overlay/patch_r22_v15.py overlay/gb10_activation.py overlay/smoke_r22_v15.py overlay/probe_r22_v15_activation.py /opt/compose/
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+import b12x
+import vllm
+sys.path.insert(0, "/opt/compose")
+from patch_r22_v15 import patch
+for b, v in ((Path("/opt/b12x-r22/b12x"), Path("/opt/vllm-r22/vllm")),
+             (Path(b12x.__file__).parent, Path(vllm.__file__).parent)):
+    patch(b, v)
+    patch(b, v, check=True)
+PY
+
+ENV VLLM_GB10_COMPACT_INPUT=1 \
+    VLLM_GB10_SIGMOID=1 \
+    VLLM_GB10_SKINNY_GEMM=1 \
+    B12X_ROCE_INLINE_PAYLOAD=1 \
+    B12X_ROCE_BALANCED_FANOUT=1
+# Includes native compilation/loading of the source-hashed RDMA proxy.
+RUN python3 /opt/compose/smoke_r22_v15.py
+LABEL local-inference.v15-overlay="glm53-r22-v15-1"
