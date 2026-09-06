@@ -187,7 +187,6 @@ command: |
     --load-format safetensors \
     --attention-backend B12X_MLA_SPARSE \
     --moe-backend b12x \
-    --no-enable-flashinfer-autotune \
     --kv-cache-dtype fp8 \
     --decode-context-parallel-size {decode_context_parallel} \
     --dcp-comm-backend ag_rs \
