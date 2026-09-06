@@ -1,0 +1,22 @@
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v13
+
+COPY overlay/patch_r22_v14.py overlay/gb10_argmax.py overlay/smoke_r22_v14.py overlay/probe_r22_v14_rotations.py /opt/compose/
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+import b12x
+import vllm
+sys.path.insert(0, "/opt/compose")
+from patch_r22_v14 import patch
+for b, v in ((Path("/opt/b12x-r22/b12x"), Path("/opt/vllm-r22/vllm")),
+             (Path(b12x.__file__).parent, Path(vllm.__file__).parent)):
+    patch(b, v)
+    patch(b, v, check=True)
+PY
+
+ENV VLLM_GB10_SHARED_INPUT_ROTATION=1 \
+    VLLM_GB10_DRAFT_ARGMAX=1 \
+    VLLM_EXL3_EXT_PATH=/opt/exllamav3
+# Catch extension discovery/ABI errors even before the per-Spark GPU tests.
+RUN python3 /opt/compose/smoke_r22_v14.py
+LABEL local-inference.v14-overlay="glm53-r22-v14-1"

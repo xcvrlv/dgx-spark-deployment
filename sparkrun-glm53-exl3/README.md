@@ -377,3 +377,12 @@ eligible gathered-query copy. Its recipe uses GPU memory utilization **0.87**.
 Build with `bash sparkrun-glm53-exl3/scripts/build-r22-v12-image.sh WORKER1 WORKER2 WORKER3`
 and use `recipes/glm53-exl3-v12-4x.yaml`. See
 [v12 investigation, GPU checks and rollback switches](docs/r22-performance-v12.md).
+
+The **v14** candidate builds on v13's dense K6 rotation fusion. It adds shared-H
+mixed-K prefill rotation reuse, enables greedy MTP local argmax, aligns its
+winner packets for RoCEnante, and adds an SM121 split-vocabulary reduction.
+It also fixes extension discovery in the smoke entrypoint and retains the
+inherited numerical checks. GPU memory utilization remains **0.87**.
+Build with `bash sparkrun-glm53-exl3/scripts/build-r22-v14-image.sh WORKER1 WORKER2 WORKER3`
+and use `recipes/glm53-exl3-v14-4x.yaml`. See
+[v14 changes, validation limits and fallback switches](docs/r22-performance-v14.md).
