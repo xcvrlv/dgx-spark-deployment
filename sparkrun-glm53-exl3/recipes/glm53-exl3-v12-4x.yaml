@@ -185,7 +185,7 @@ command: |
     --quantization exl3 \
     --quantization-config '{"linear":{"weight":"mxfp8"},"shared_experts":{"weight":"mxfp8"},"ignore":["re:.*\\.fused_qkv_a_proj$","re:.*\\.q_a_proj$","re:.*kv_a_proj_with_mqa","re:.*\\.mlp\\.gate$","model.layers.78.eh_proj","lm_head"]}' \
     --load-format safetensors \
-    --attention-backend B12X_MLA_SPARSE \
+    --attention-backend B12X \
     --moe-backend b12x \
     --kv-cache-dtype fp8 \
     --decode-context-parallel-size {decode_context_parallel} \
@@ -199,5 +199,5 @@ command: |
     --enable-auto-tool-choice \
     --generation-config vllm \
     --hf-overrides '{"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
-    --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":3,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X_MLA_SPARSE\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
+    --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":3,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
     --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'
