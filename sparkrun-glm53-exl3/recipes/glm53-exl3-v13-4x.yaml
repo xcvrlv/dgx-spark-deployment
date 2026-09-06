@@ -182,7 +182,6 @@ command: |
     --load-format safetensors \
     --attention-backend B12X \
     --moe-backend b12x \
-    --no-enable-flashinfer-autotune \
     --kv-cache-dtype fp8 \
     --decode-context-parallel-size {decode_context_parallel} \
     --dcp-comm-backend ag_rs \
@@ -190,6 +189,7 @@ command: |
     --enable-chunked-prefill \
     --enable-prefix-caching \
     --async-scheduling \
+    --disable-custom-all-reduce \
     --reasoning-parser glm45 \
     --tool-call-parser glm47 \
     --enable-auto-tool-choice \
