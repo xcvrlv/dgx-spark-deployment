@@ -1,0 +1,17 @@
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v11
+
+COPY overlay/patch_r22_v12.py overlay/r22_v12_ckv.py overlay/smoke_r22_v12.py /opt/compose/
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+import vllm
+sys.path.insert(0, "/opt/compose")
+from patch_r22_v12 import patch
+for root in (Path("/opt/vllm-r22/vllm"), Path(vllm.__file__).parent):
+    patch(root)
+    patch(root, check=True)
+PY
+
+ENV VLLM_GLM53_FUSED_CKV_METADATA=1 \
+    VLLM_GLM53_BORROW_MLA_QUERY=1
+LABEL local-inference.v12-overlay="glm53-r22-v12-1"

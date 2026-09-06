@@ -371,3 +371,9 @@ from the repository root, then use `recipes/glm53-exl3-v11-4x.yaml`.
 The v10 image and recipe remain available for rollback. See
 [v11 findings, validation and A/B instructions](docs/r22-performance-v11.md).
 Performance and end-to-end MTP acceptance still require Spark measurements.
+
+The **v12** candidate adds fused full-CKV metadata preparation and avoids an
+eligible gathered-query copy. Its recipe uses GPU memory utilization **0.87**.
+Build with `bash sparkrun-glm53-exl3/scripts/build-r22-v12-image.sh WORKER1 WORKER2 WORKER3`
+and use `recipes/glm53-exl3-v12-4x.yaml`. See
+[v12 investigation, GPU checks and rollback switches](docs/r22-performance-v12.md).

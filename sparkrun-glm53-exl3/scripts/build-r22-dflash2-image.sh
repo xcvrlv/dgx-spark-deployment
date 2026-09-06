@@ -34,8 +34,13 @@ recorded_fabric_id="$(
 test "$recorded_fabric_id" = "$fabric_id"
 docker run --rm --gpus all --entrypoint python3 "$image" \
   /opt/compose/smoke_r22_image.py --gpu
-docker run --rm --gpus all --entrypoint python3 "$image" \
-  /opt/compose/smoke_r22_performance.py --gpu
+if [[ "${GLM53_R22_V12_SMOKE:-0}" == 1 ]]; then
+  docker run --rm --gpus all --entrypoint python3 "$image" \
+    /opt/compose/smoke_r22_v12.py --gpu
+else
+  docker run --rm --gpus all --entrypoint python3 "$image" \
+    /opt/compose/smoke_r22_performance.py --gpu
+fi
 if [[ "${GLM53_R22_V11_SMOKE:-0}" == 1 ]]; then
   docker run --rm --gpus all --entrypoint python3 "$image" \
     /opt/compose/smoke_r22_v11.py --gpu
@@ -52,8 +57,13 @@ for worker in "$@"; do
   test "$remote_platform" = "linux/arm64"
   ssh "$worker" docker run --rm --gpus all --entrypoint python3 "$image" \
     /opt/compose/smoke_r22_image.py --gpu
-  ssh "$worker" docker run --rm --gpus all --entrypoint python3 "$image" \
-    /opt/compose/smoke_r22_performance.py --gpu
+  if [[ "${GLM53_R22_V12_SMOKE:-0}" == 1 ]]; then
+    ssh "$worker" docker run --rm --gpus all --entrypoint python3 "$image" \
+      /opt/compose/smoke_r22_v12.py --gpu
+  else
+    ssh "$worker" docker run --rm --gpus all --entrypoint python3 "$image" \
+      /opt/compose/smoke_r22_performance.py --gpu
+  fi
   if [[ "${GLM53_R22_V11_SMOKE:-0}" == 1 ]]; then
     ssh "$worker" docker run --rm --gpus all --entrypoint python3 "$image" \
       /opt/compose/smoke_r22_v11.py --gpu
