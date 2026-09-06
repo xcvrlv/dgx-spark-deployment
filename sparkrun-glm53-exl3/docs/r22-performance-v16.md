@@ -108,7 +108,7 @@ RoCEnante still stages payloads in its registered pinned region.
 
 ## Validation
 
-Seven v16 CPU tests pass. They execute the transformed CKV and indexer methods
+Nine v16 CPU tests pass. They execute the transformed CKV and indexer methods
 with instrumented tensors, exercise partial chunks and arena bounds, check
 rank offsets and empty shards, verify untouched padding, enforce fail-stop
 dispatch, and verify selective protocol initialization. The overlay rejects
@@ -117,6 +117,14 @@ The sigmoid regression check requires typed initialization before the staged
 conditional and a single final return, and exercises
 finite, infinite and NaN inputs with the optimization enabled and disabled.
 This CPU check does not substitute for CuTe compilation on the Spark.
+
+The indexer smoke compares exact per-row ID multisets against an independent
+CPU score/global-ID oracle, for both legacy and v16 paths, including replay
+after changing scores. The reducer's atomic output append does not guarantee
+column order, even though membership uses stable tie-breaking. Sorting only
+the test outputs preserves checks for duplicates, padding, wrong IDs and row
+mixups; inference output is unchanged. CPU regressions check these failure
+cases and the inherited timing-helper import.
 
 The Docker build compiles the actual changed proxy and runs a native C harness
 covering pending, empty, completed and failed CQ states without needing an

@@ -249,5 +249,23 @@ class Tests(unittest.TestCase):
         docker = (ROOT/'Dockerfile.r22-dflash2-v16').read_text(encoding='utf-8')
         self.assertIn('COPY overlay/smoke_r22_v15.py /opt/compose/smoke_r22_v15.py', docker)
 
+    def test_indexer_oracle_checks_selection_not_atomic_append_order(self):
+        spec = importlib.util.spec_from_file_location('smoke16', ROOT/'overlay/smoke_r22_v16.py')
+        smoke = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(smoke)
+        ids = np.array([[0,1,2,-1],[-1,-1,-1,-1]], dtype=np.int32)
+        scores = np.array([[5,5,5,99],[99,99,99,99]], dtype=np.float32)
+        reference = smoke.indexer_reference_ids(ids,scores,2,1)
+        np.testing.assert_array_equal(reference, [[0,1,2,3],[-1,-1,-1,-1]])
+        smoke.assert_indexer_multiset(reference[:,::-1], reference, 'permutation')
+        for column, wrong_id in ((0,1),(3,4),(0,-1)):
+            bad = reference.copy(); bad[0,column] = wrong_id
+            with self.assertRaises(AssertionError):
+                smoke.assert_indexer_multiset(bad, reference, 'wrong selection')
+        with self.assertRaises(AssertionError):
+            smoke.assert_indexer_multiset(reference[::-1], reference, 'wrong row')
+        np.testing.assert_array_equal(smoke.indexer_reference_ids(
+            [[0,16,17,-1]], [[1,5,5,99]],2,16), [[32,33,48,49]])
+
 
 if __name__ == '__main__': unittest.main()

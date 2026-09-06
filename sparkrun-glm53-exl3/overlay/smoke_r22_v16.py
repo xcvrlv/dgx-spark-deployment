@@ -51,6 +51,34 @@ def ckv_gpu():
     return dict(ckv_inplace_cases=cases)
 
 
+def indexer_reference_ids(indices, scores, world, interleave):
+    """CPU oracle for this fixture's identical local candidates on every rank.
+
+    Select by descending score, then ascending global ID. Output order from
+    the GPU's atomic append is unspecified, so return canonical ID order.
+    """
+    import numpy as np
+    indices, scores = np.asarray(indices), np.asarray(scores)
+    valid = indices >= 0
+    safe = np.maximum(indices, 0).astype(np.int64)
+    global_ids = np.concatenate([
+        np.where(valid, (safe // interleave) * (world * interleave)
+                 + rank * interleave + safe % interleave, -1)
+        for rank in range(world)], axis=1)
+    candidate_scores = np.tile(np.where(valid, scores, -np.inf), (1, world))
+    # Invalid candidates always follow valid ones, including score=-inf.
+    order = np.lexsort((global_ids, -candidate_scores, global_ids < 0), axis=1)
+    selected = np.take_along_axis(global_ids, order[:, :indices.shape[1]], axis=1)
+    return np.sort(selected, axis=1).astype(np.int32)
+
+
+def assert_indexer_multiset(actual, reference, context):
+    import numpy as np
+    # Sorting retains multiplicity and padding; a set comparison would hide
+    # duplicate IDs or lost candidates. Keep every row independent and exact.
+    np.testing.assert_array_equal(np.sort(actual, axis=1), reference, err_msg=context)
+
+
 def indexer_gpu(group=None):
     """Real Triton packing + CuTe stable merge, workspace reuse and replay."""
     import torch
@@ -90,10 +118,15 @@ def indexer_gpu(group=None):
                 impl._V16_MERGE_ROWS = 256 if optimized else 0
                 target.copy_(ids)
                 impl._merge_dcp_topk(target,scores,rank,world,interleave)
+            def compare(phase):
+                reference = indexer_reference_ids(ids.cpu().numpy(), scores.cpu().numpy(), world, interleave)
+                context = f'{phase}: rows={rows}, topk={topk}, interleave={interleave}, rank={rank}'
+                assert_indexer_multiset(expected.cpu().numpy(), reference, 'legacy '+context)
+                assert_indexer_multiset(actual.cpu().numpy(), reference, 'v16 '+context)
             run(expected,False)
             run(actual,True)
             torch.cuda.synchronize()
-            torch.testing.assert_close(actual,expected,rtol=0,atol=0)
+            compare('eager')
             graph = torch.cuda.CUDAGraph()
             if group:
                 with group.device_communicator.b12x_ar_comm.capture():
@@ -105,7 +138,7 @@ def indexer_gpu(group=None):
                 run(expected,False)
                 graph.replay()
                 torch.cuda.synchronize()
-                torch.testing.assert_close(actual,expected,rtol=0,atol=0)
+                compare('graph replay')
             if group is None:
                 results.append(dict(rows=rows,topk=topk,legacy_ms=ms(lambda:run(expected,False)),
                                     pooled_ms=ms(lambda:run(actual,True))))
