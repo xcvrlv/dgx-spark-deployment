@@ -11,6 +11,12 @@ compute changes. GPU memory utilization remains **0.87**, prefill block M32,
 batch/scratch capacity 4096, and native MTP3. No throughput measurements were
 possible on the Windows development machine; v16 is ready for cluster testing.
 
+Revision `glm53-r22-v16-2` also fixes the inherited sigmoid's CuTe
+`UNSUP_EARLY_EXIT` compilation failure. Both runtime branches assign a result
+and the method returns once afterward. The reciprocal and division fallback
+calculations are preserved. Re-run the same v16 build command; the fix is a
+late v16 patch over the existing v15 image and does not require changing v15.
+
 ## What changed
 
 | Change | Why it can help | Disable for comparison |
@@ -100,11 +106,14 @@ RoCEnante still stages payloads in its registered pinned region.
 
 ## Validation
 
-Six new CPU tests pass. They execute the transformed CKV and indexer methods
+Seven v16 CPU tests pass. They execute the transformed CKV and indexer methods
 with instrumented tensors, exercise partial chunks and arena bounds, check
 rank offsets and empty shards, verify untouched padding, enforce fail-stop
 dispatch, and verify selective protocol initialization. The overlay rejects
 source drift before writing any file and accepts exact reapplication.
+The sigmoid regression check requires a single final return and exercises
+finite, infinite and NaN inputs with the optimization enabled and disabled.
+This CPU check does not substitute for CuTe compilation on the Spark.
 
 The Docker build compiles the actual changed proxy and runs a native C harness
 covering pending, empty, completed and failed CQ states without needing an

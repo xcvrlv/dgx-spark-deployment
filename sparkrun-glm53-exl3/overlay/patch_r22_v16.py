@@ -3,20 +3,35 @@
 import hashlib
 from pathlib import Path
 
-VERSION = "glm53-r22-v16-1"
+VERSION = "glm53-r22-v16-2"
+KERNEL = "moe/_shared/kernels/w4a16/kernel.py"
 ATTENTION = "v1/attention/backends/mla/b12x_mla_sparse.py"
 INDEXER = "v1/attention/backends/mla/b12x_indexer.py"
 HELPER = "distributed/device_communicators/gb10_dcp.py"
 RUNTIME = "comm/roce/roce_oneshot.py"
 PROXY = "comm/roce/_roce_proxy.c"
-INPUTS = {'v1/attention/backends/mla/b12x_mla_sparse.py': '05d68843ce90f972a26075a221f869fcd1084374cb14a5655b06a856c3df5f15', 'v1/attention/backends/mla/b12x_indexer.py': '269506b11518f91600bf58cede43fd61a53725ab3d06aa7d3f884791230ee079', 'comm/roce/roce_oneshot.py': '92a32ed7ad570f54228998da10dc8dd463a042458c2bbd6beec521d1668344d4', 'comm/roce/_roce_proxy.c': '10a74fe714069def0f2356addd7a2c3178d7e82e3a678954de7448a5a249c6e9'}
-OUTPUTS = {'v1/attention/backends/mla/b12x_mla_sparse.py': '90099538aac0055c187504f2f7df9eff65facdc44e35178424562e518bf3d266', 'v1/attention/backends/mla/b12x_indexer.py': '6920327ca8ac67bd746ed96bdb71671ab84fd3991d9d4f274a76a7c8944c88c2', 'comm/roce/roce_oneshot.py': '1eb29a73a3fc0d65b5598cc0520691f9e126c706183f88bc525aa48e2cd74b98', 'comm/roce/_roce_proxy.c': 'b41e32ee56fb980bf8a5c75e855219665452a029b817643e4ace3bdf1717a6c1', 'distributed/device_communicators/gb10_dcp.py': '15e443a0119e234b3fa1bbc8a2ea8cef6af0212c4f4701293f489323fafad5a7'}
+INPUTS = {'v1/attention/backends/mla/b12x_mla_sparse.py': '05d68843ce90f972a26075a221f869fcd1084374cb14a5655b06a856c3df5f15', 'v1/attention/backends/mla/b12x_indexer.py': '269506b11518f91600bf58cede43fd61a53725ab3d06aa7d3f884791230ee079', 'comm/roce/roce_oneshot.py': '92a32ed7ad570f54228998da10dc8dd463a042458c2bbd6beec521d1668344d4', 'comm/roce/_roce_proxy.c': '10a74fe714069def0f2356addd7a2c3178d7e82e3a678954de7448a5a249c6e9', 'moe/_shared/kernels/w4a16/kernel.py': '2e0e11bdb37e71d8fe5d926d46fd1aaa23a384060e10276b2f7efbef4a87f975'}
+OUTPUTS = {'v1/attention/backends/mla/b12x_mla_sparse.py': '90099538aac0055c187504f2f7df9eff65facdc44e35178424562e518bf3d266', 'v1/attention/backends/mla/b12x_indexer.py': '6920327ca8ac67bd746ed96bdb71671ab84fd3991d9d4f274a76a7c8944c88c2', 'comm/roce/roce_oneshot.py': '1eb29a73a3fc0d65b5598cc0520691f9e126c706183f88bc525aa48e2cd74b98', 'comm/roce/_roce_proxy.c': 'b41e32ee56fb980bf8a5c75e855219665452a029b817643e4ace3bdf1717a6c1', 'distributed/device_communicators/gb10_dcp.py': '15e443a0119e234b3fa1bbc8a2ea8cef6af0212c4f4701293f489323fafad5a7', 'moe/_shared/kernels/w4a16/kernel.py': '50b296d3dc0fd270b9999586f6c1716c2aef0fe5c4b645cf59ae543fb71f0022'}
 
 
 def replace(text, old, new):
     if text.count(old) != 1:
         raise RuntimeError(f"v16 source anchor mismatch: {old[:100]!r}")
     return text.replace(old, new, 1)
+
+
+def kernel(text):
+    # CuTe's runtime conditional must merge a value, not return from one arm.
+    # Keep division solely in the fallback arm so the fast path remains fast.
+    return replace(text,
+        "                return gb10_reciprocal(denominator)\n"
+        "        return cutlass.Float32(1.0) / denominator\n",
+        "                result = gb10_reciprocal(denominator)\n"
+        "            else:\n"
+        "                result = cutlass.Float32(1.0) / denominator\n"
+        "        else:\n"
+        "            result = cutlass.Float32(1.0) / denominator\n"
+        "        return result\n")
 
 
 def attention(text):
@@ -128,7 +143,8 @@ def proxy(text):
 
 def patch(b12x_root, vllm_root, check=False):
     jobs = [(Path(vllm_root), ATTENTION, attention), (Path(vllm_root), INDEXER, indexer),
-            (Path(b12x_root), RUNTIME, runtime), (Path(b12x_root), PROXY, proxy)]
+            (Path(b12x_root), RUNTIME, runtime), (Path(b12x_root), PROXY, proxy),
+            (Path(b12x_root), KERNEL, kernel)]
     pending = []
     for root, name, transform in jobs:
         path = root / name

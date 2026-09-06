@@ -24,4 +24,4 @@ ENV VLLM_GB10_DCP_GATHER_INTO=1 \
     B12X_ROCE_LAZY_PAYLOAD_INIT=1 \
     B12X_ROCE_SKIP_EMPTY_CQ=1
 RUN python3 /opt/compose/smoke_r22_v16.py
-LABEL local-inference.v16-overlay="glm53-r22-v16-1"
+LABEL local-inference.v16-overlay="glm53-r22-v16-2"

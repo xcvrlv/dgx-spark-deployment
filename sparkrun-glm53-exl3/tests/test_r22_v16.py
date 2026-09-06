@@ -59,6 +59,37 @@ class Tests(unittest.TestCase):
             with self.assertRaises(RuntimeError): p.patch(b,v)
             self.assertEqual(before,{f:f.read_bytes() for f in dest.rglob('*') if f.is_file()})
 
+    def test_sigmoid_has_one_final_return_and_preserves_fallback(self):
+        source = p.kernel(self.source(p.KERNEL, 'b12x'))
+        cls = next(n for n in ast.parse(source).body
+                   if isinstance(n, ast.ClassDef) and n.name == 'W4A16FusedMoeKernel')
+        method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == '_sigmoid_f32')
+        returns = [n for n in ast.walk(method) if isinstance(n, ast.Return)]
+        self.assertEqual(returns, [method.body[-1]])
+        reciprocal_calls, exponential_modes = [], []
+        def reciprocal(value):
+            reciprocal_calls.append(value)
+            return np.float32(1) / value
+        def exponential(value, *, fastmath):
+            exponential_modes.append(fastmath)
+            return np.exp(value)
+        ns = functions(ast.unparse(method), {'_sigmoid_f32'}, {
+            'cutlass': NS(Float32=np.float32, const_expr=bool),
+            'cute': NS(math=NS(exp=exponential)), 'gb10_reciprocal': reciprocal})
+        for fast_math in (False, True):
+            for enabled in (False, True):
+                for value in (-np.inf, -105., -90., -87., -20., 0., 20., np.inf, np.nan):
+                    reciprocal_calls.clear()
+                    with np.errstate(over='ignore', invalid='ignore'):
+                        x = np.float32(value)
+                        denominator = np.float32(1) + np.exp(-x)
+                        expected = np.float32(1) / denominator
+                        actual = ns['_sigmoid_f32'](NS(fast_math=fast_math, gb10_sigmoid=enabled), x)
+                    np.testing.assert_equal(actual, expected)
+                    eligible = enabled and denominator >= 1 and denominator < np.float32(2.**126)
+                    self.assertEqual(len(reciprocal_calls), int(eligible))
+                    self.assertEqual(exponential_modes[-1], fast_math)
+
     def test_ckv_inplace_actual_method_uses_active_rank_offset(self):
         group=[None];calls=[]
         def cache_gather(*,src_cache,dst,block_table,cu_seq_lens,batch_size):

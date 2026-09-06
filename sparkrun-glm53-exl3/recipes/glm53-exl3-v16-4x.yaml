@@ -25,7 +25,7 @@ metadata:
   v13_overlay: glm53-r22-v13-1
   v14_overlay: glm53-r22-v14-1
   v15_overlay: glm53-r22-v15-1
-  v16_overlay: glm53-r22-v16-1
+  v16_overlay: glm53-r22-v16-2
   b12x_rocenante_backport: b58f34eaf978277621efced6678e6713fd7122e4
 
 defaults:
