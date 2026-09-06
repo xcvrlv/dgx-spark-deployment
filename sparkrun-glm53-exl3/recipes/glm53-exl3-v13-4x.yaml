@@ -2,13 +2,13 @@
 # native MTP heads on exactly four DGX Sparks. The R22 image retains DFlash2
 # support, but this recipe deliberately does not load the external draft.
 recipe_version: "2"
-name: glm53-exl3-r22-v12-mtp3-4x
+name: glm53-exl3-r22-v13-mtp3-4x
 description: GLM-5.3 mixed-K EXL3 with model-native MTP3 on four SM121 Sparks.
 model: /home/juho/.cache/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw
 runtime: vllm-distributed
 runtime_config:
   dashboard: false
-container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v12
+container: spark-vllm-glm53-exl3:r22-dflash2-sm121-v13
 min_nodes: 4
 max_nodes: 4
 
@@ -22,6 +22,7 @@ metadata:
   performance_overlay: glm53-r22-performance-v1
   v11_overlay: glm53-r22-v11-1
   v12_overlay: glm53-r22-v12-1
+  v13_overlay: glm53-r22-v13-1
   b12x_rocenante_backport: b58f34eaf978277621efced6678e6713fd7122e4
 
 defaults:
@@ -36,6 +37,8 @@ defaults:
   served_model_name: glm-5.3-exl3-r22-mtp3
 
 env:
+  # v13: retain FP16 MMA and fuse the surrounding dense K6 rotations.
+  VLLM_GB10_DENSE_ROTATIONS: "1"
   # v12: independent switches; restart every worker after changing.
   VLLM_GLM53_FUSED_CKV_METADATA: "1"
   VLLM_GLM53_BORROW_MLA_QUERY: "1"
@@ -112,16 +115,8 @@ env:
   # query heads; decode and mixed batches retain ordinary DCP. Match safe's
   # 128K gather envelope to bound transient memory and fabric traffic.
   VLLM_B12X_MLA_CKV_GATHER: "1"
+  VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS: "16"
   VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS: "131072"
-  VLLM_DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS: "8192"
-
-  # maybes
-
-  VLLM_DCP_QUERY_SPLIT: "1"
-  VLLM_B12X_MLA_CKV_PREFETCH_DEPTH: "0"
-  B12X_PCIE_DMA_FP8: "0"
-
-
   VLLM_USE_DIRECT_DCP_A2A: "0"
   VLLM_USE_DIRECT_DCP_Q_GATHER: "0"
   VLLM_USE_DIRECT_DCP_KV_GATHER: "0"
@@ -185,7 +180,7 @@ command: |
     --quantization exl3 \
     --quantization-config '{"linear":{"weight":"mxfp8"},"shared_experts":{"weight":"mxfp8"},"ignore":["re:.*\\.fused_qkv_a_proj$","re:.*\\.q_a_proj$","re:.*kv_a_proj_with_mqa","re:.*\\.mlp\\.gate$","model.layers.78.eh_proj","lm_head"]}' \
     --load-format safetensors \
-    --attention-backend B12X_MLA_SPARSE \
+    --attention-backend B12X \
     --moe-backend b12x \
     --no-enable-flashinfer-autotune \
     --kv-cache-dtype fp8 \
@@ -200,5 +195,5 @@ command: |
     --enable-auto-tool-choice \
     --generation-config vllm \
     --hf-overrides '{"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
-    --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":3,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X_MLA_SPARSE\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
+    --speculative-config "{\"model\":\"$model_path\",\"method\":\"mtp\",\"num_speculative_tokens\":3,\"draft_tensor_parallel_size\":4,\"quantization\":\"exl3\",\"moe_backend\":\"b12x\",\"attention_backend\":\"B12X\",\"use_local_argmax_reduction\":false,\"draft_sample_method\":\"greedy\"}" \
     --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":false}}'
