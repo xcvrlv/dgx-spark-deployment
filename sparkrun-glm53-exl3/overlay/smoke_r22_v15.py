@@ -132,6 +132,7 @@ def main():
 def mixed_activation_gpu():
     """Exercise the real two/three-tier cooperative grid and its phase barriers."""
     import torch
+    from smoke_r22_v14 import ms
     from b12x.moe._shared.kernels.w4a16 import mixed_trellis as api
     from b12x.moe._shared.kernels.w4a16.host import max_packed_route_slots
     from b12x.moe._shared.kernels.w4a16.prepare import prepare_trellis256_moe_weights

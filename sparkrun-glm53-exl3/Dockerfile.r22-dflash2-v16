@@ -1,5 +1,7 @@
 FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v15
 
+# Refresh the inherited test even when building directly from a cached v15.
+COPY overlay/smoke_r22_v15.py /opt/compose/smoke_r22_v15.py
 COPY overlay/patch_r22_v16.py overlay/gb10_dcp.py overlay/smoke_r22_v16.py overlay/probe_r22_v16_proxy.c /opt/compose/
 RUN python3 - <<'PY'
 from pathlib import Path

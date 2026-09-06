@@ -232,5 +232,22 @@ class Tests(unittest.TestCase):
         self.assertEqual(build.count('/opt/compose/smoke_r22_v16.py --gpu'),2)
         self.assertLess(build.index('GLM53_R22_V16_SMOKE'),build.index('GLM53_R22_V12_SMOKE'))
 
+    def test_inherited_timing_helpers_are_imported(self):
+        tree = ast.parse((ROOT/'overlay/smoke_r22_v15.py').read_text(encoding='utf-8'))
+        checked = []
+        for function in tree.body:
+            if not isinstance(function, ast.FunctionDef):
+                continue
+            calls = [n for n in ast.walk(function) if isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Name) and n.func.id == 'ms']
+            if calls:
+                self.assertTrue(any(isinstance(n, ast.ImportFrom) and n.module == 'smoke_r22_v14'
+                                    and any(a.name == 'ms' for a in n.names)
+                                    for n in function.body), function.name)
+                checked.append(function.name)
+        self.assertIn('mixed_activation_gpu', checked)
+        docker = (ROOT/'Dockerfile.r22-dflash2-v16').read_text(encoding='utf-8')
+        self.assertIn('COPY overlay/smoke_r22_v15.py /opt/compose/smoke_r22_v15.py', docker)
+
 
 if __name__ == '__main__': unittest.main()
