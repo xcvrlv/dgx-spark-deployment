@@ -66,6 +66,14 @@ class Tests(unittest.TestCase):
         method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == '_sigmoid_f32')
         returns = [n for n in ast.walk(method) if isinstance(n, ast.Return)]
         self.assertEqual(returns, [method.body[-1]])
+        # Python permits a new name in both arms; CuTe staged regions require
+        # that name to exist before the region so it can carry the result out.
+        branch = next(i for i, n in enumerate(method.body)
+                      if isinstance(n, ast.If) and 'gb10_sigmoid' in ast.unparse(n.test))
+        initializers = [n for n in method.body[:branch] if isinstance(n, ast.Assign)
+                        and any(isinstance(t, ast.Name) and t.id == 'result' for t in n.targets)]
+        self.assertEqual(len(initializers), 1)
+        self.assertEqual(ast.unparse(initializers[0].value), 'cutlass.Float32(0.0)')
         reciprocal_calls, exponential_modes = [], []
         def reciprocal(value):
             reciprocal_calls.append(value)
