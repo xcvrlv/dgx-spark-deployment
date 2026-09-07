@@ -413,3 +413,10 @@ causal lengths across layers. Build with
 `bash sparkrun-glm53-exl3/scripts/build-r22-v18-image.sh WORKER1 WORKER2 WORKER3`
 and use `recipes/glm53-exl3-v18-4x.yaml`. It retains v17's memory and batching
 settings. See [v18 scope, cumulative smoke and rollback switches](docs/r22-performance-v18.md).
+
+The **v19** candidate adds mixed-K M16 prefill support through the existing M8
+FC2 kernel and an optional SM121 FC2 scheduling control. M32/group2 stays the
+baseline. Build with
+`bash sparkrun-glm53-exl3/scripts/build-r22-v19-image.sh WORKER1 WORKER2 WORKER3`
+and use `recipes/glm53-exl3-v19-4x.yaml`. See
+[v19 tuning, GPU qualification and expert-parallel findings](docs/r22-performance-v19.md).

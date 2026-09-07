@@ -128,12 +128,12 @@ def partition_gpu():
     return dict(v18_paged_partition='passed', v18_partitioned_ms=ms(runs[0]), v18_coalesced_ms=ms(runs[1]))
 
 
-def main():
+def main(source_overrides=None):
     import vllm
     from patch_r22_v18 import patch, VERSION, OUTPUTS
     patch(Path(vllm.__file__).parent, check=True)
     from smoke_r22_v17 import main as inherited
-    inherited(source_overrides=OUTPUTS)
+    inherited(source_overrides={**OUTPUTS, **(source_overrides or {})})
     result = dict(continuation_overlay=VERSION)
     if '--gpu' in sys.argv:
         result.update(metadata_gpu())

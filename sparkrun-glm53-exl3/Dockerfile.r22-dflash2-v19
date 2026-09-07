@@ -1,0 +1,17 @@
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v18
+COPY overlay/patch_r22_v19.py overlay/smoke_r22_v19.py /opt/compose/
+# Cumulative validation must accept the intentional v19 B12X source override.
+COPY overlay/smoke_r22_v18.py /opt/compose/
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+import b12x
+sys.path.insert(0, '/opt/compose')
+from patch_r22_v19 import patch
+for root in (Path('/opt/b12x-r22/b12x'), Path(b12x.__file__).parent):
+    patch(root)
+    patch(root, check=True)
+PY
+ENV VLLM_GB10_EXL3_FC2_GROUP=2
+RUN python3 /opt/compose/smoke_r22_v19.py
+LABEL local-inference.v19-overlay="glm53-r22-v19-1"
