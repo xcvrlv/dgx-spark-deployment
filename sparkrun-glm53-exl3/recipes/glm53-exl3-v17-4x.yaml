@@ -103,11 +103,11 @@ env:
   VLLM_ROCE_DCP_ENABLE: "1"
   VLLM_ROCE_DCP_RS_MAX_BYTES: "262144"
   B12X_ROCE_CACHE_DIR: /opt/b12x-roce-cache
-  OMP_NUM_THREADS: "8"
-  OPENBLAS_NUM_THREADS: "8"
-  MKL_NUM_THREADS: "8"
-  NUMEXPR_NUM_THREADS: "8"
-  RAYON_NUM_THREADS: "8"
+  OMP_NUM_THREADS: "4"
+  OPENBLAS_NUM_THREADS: "4"
+  MKL_NUM_THREADS: "4"
+  NUMEXPR_NUM_THREADS: "4"
+  RAYON_NUM_THREADS: "4"
   TOKENIZERS_PARALLELISM: "false"
   MALLOC_ARENA_MAX: "2"
 
@@ -160,7 +160,7 @@ env:
 
 executor: docker
 executor_config:
-  auto_remove: false
+  auto_remove: true
   entrypoint: ""
   gpu_access_mode: gpus
   ipc: host
