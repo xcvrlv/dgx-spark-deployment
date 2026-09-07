@@ -37,13 +37,16 @@ def reclaim_gpu():
     return {'live_graph_after_reclamation':'passed','memory':report}
 
 
-def main():
+def main(source_overrides=None):
     import vllm
     from patch_r22_v17 import patch, VERSION
     patch(Path(vllm.__file__).parent,check=True)
     print(json.dumps({'startup_overlay':VERSION}),flush=True)
     from smoke_r22_v16 import main as inherited
-    inherited()
+    if source_overrides is None:
+        inherited()
+    else:
+        inherited(source_overrides=source_overrides)
     if '--gpu' in sys.argv:
         print(json.dumps(reclaim_gpu(),sort_keys=True),flush=True)
 

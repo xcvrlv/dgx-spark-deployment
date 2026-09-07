@@ -406,3 +406,10 @@ logs host/CUDA memory, and bounds prefix-cache hash copies to new blocks.
 Build with `bash sparkrun-glm53-exl3/scripts/build-r22-v17-image.sh WORKER1 WORKER2 WORKER3`
 and use `recipes/glm53-exl3-v17-4x.yaml`. The default stays **0.87**; **0.89**
 remains a test target. See [v17 changes and measurement limits](docs/r22-performance-v17.md).
+
+The **v18** candidate coalesces long-context B12X indexer calls, removes unused
+context-sized prefill token maps and GPU-to-CPU synchronization, and reuses
+causal lengths across layers. Build with
+`bash sparkrun-glm53-exl3/scripts/build-r22-v18-image.sh WORKER1 WORKER2 WORKER3`
+and use `recipes/glm53-exl3-v18-4x.yaml`. It retains v17's memory and batching
+settings. See [v18 scope, cumulative smoke and rollback switches](docs/r22-performance-v18.md).

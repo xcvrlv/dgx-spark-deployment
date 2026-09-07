@@ -197,7 +197,7 @@ def distributed_gpu():
         dist.destroy_process_group()
 
 
-def main():
+def main(source_overrides=None):
     import b12x
     import vllm
     from patch_r22_v16 import patch, VERSION, OUTPUTS, PROXY, RUNTIME
@@ -211,9 +211,10 @@ def main():
     parser.add_argument('--distributed',action='store_true')
     args = parser.parse_args()
     b,v = Path(b12x.__file__).parent,Path(vllm.__file__).parent
-    patch(b,v,check=True)
+    if source_overrides is None:
+        patch(b,v,check=True)
     # Latest hash wins; old smoke main() functions reject intentional overlays.
-    hashes = {**v11, **v13, **v14, **v15, **OUTPUTS}
+    hashes = {**v11, **v13, **v14, **v15, **OUTPUTS, **(source_overrides or {})}
     for name,expected in hashes.items():
         root = b if name.startswith(('moe/','comm/')) else v
         assert hashlib.sha256((root/name).read_text(encoding='utf-8').encode()).hexdigest() == expected,name

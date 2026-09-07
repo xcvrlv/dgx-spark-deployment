@@ -1,0 +1,17 @@
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v17
+COPY overlay/patch_r22_v18.py overlay/gb10_indexer_prefill.py overlay/smoke_r22_v18.py /opt/compose/
+# Retain all inherited GPU tests with latest-version source verification.
+COPY overlay/smoke_r22_v16.py overlay/smoke_r22_v17.py /opt/compose/
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+import vllm
+sys.path.insert(0, '/opt/compose')
+from patch_r22_v18 import patch
+for root in (Path('/opt/vllm-r22/vllm'), Path(vllm.__file__).parent):
+    patch(root)
+    patch(root, check=True)
+PY
+ENV VLLM_GB10_INDEXER_COALESCE=1 VLLM_GB10_INDEXER_METADATA=1
+RUN python3 /opt/compose/smoke_r22_v18.py
+LABEL local-inference.v18-overlay="glm53-r22-v18-1"
