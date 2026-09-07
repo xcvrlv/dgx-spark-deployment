@@ -400,3 +400,9 @@ proxy polling and startup memory writes. Build with
 `bash sparkrun-glm53-exl3/scripts/build-r22-v16-image.sh WORKER1 WORKER2 WORKER3`
 and use `recipes/glm53-exl3-v16-4x.yaml`. Memory utilization stays **0.87**.
 See [v16 memory accounting, validation and rollback switches](docs/r22-performance-v16.md).
+
+The **v17** candidate reclaims unused allocator pages at startup boundaries,
+logs host/CUDA memory, and bounds prefix-cache hash copies to new blocks.
+Build with `bash sparkrun-glm53-exl3/scripts/build-r22-v17-image.sh WORKER1 WORKER2 WORKER3`
+and use `recipes/glm53-exl3-v17-4x.yaml`. The default stays **0.87**; **0.89**
+remains a test target. See [v17 changes and measurement limits](docs/r22-performance-v17.md).

@@ -1,0 +1,15 @@
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v16
+COPY overlay/patch_r22_v17.py overlay/gb10_startup_memory.py overlay/smoke_r22_v17.py /opt/compose/
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+import vllm
+sys.path.insert(0, '/opt/compose')
+from patch_r22_v17 import patch
+for root in (Path('/opt/vllm-r22/vllm'),Path(vllm.__file__).parent):
+    patch(root)
+    patch(root,check=True)
+PY
+ENV VLLM_GB10_STARTUP_RECLAIM=1
+RUN python3 /opt/compose/smoke_r22_v17.py
+LABEL local-inference.v17-overlay="glm53-r22-v17-1"

@@ -36,7 +36,7 @@ docker run --rm --gpus all --entrypoint python3 "$image" \
   /opt/compose/smoke_r22_image.py --gpu
 if [[ "${GLM53_R22_V16_SMOKE:-0}" == 1 ]]; then
   docker run --rm --gpus all --entrypoint python3 "$image" \
-    /opt/compose/smoke_r22_v16.py --gpu
+    "/opt/compose/${GLM53_R22_SMOKE_SCRIPT:-smoke_r22_v16.py}" --gpu
 elif [[ "${GLM53_R22_V12_SMOKE:-0}" == 1 ]]; then
   docker run --rm --gpus all --entrypoint python3 "$image" \
     /opt/compose/smoke_r22_v12.py --gpu
@@ -73,7 +73,7 @@ for worker in "$@"; do
     /opt/compose/smoke_r22_image.py --gpu
   if [[ "${GLM53_R22_V16_SMOKE:-0}" == 1 ]]; then
     ssh "$worker" docker run --rm --gpus all --entrypoint python3 "$image" \
-      /opt/compose/smoke_r22_v16.py --gpu
+      "/opt/compose/${GLM53_R22_SMOKE_SCRIPT:-smoke_r22_v16.py}" --gpu
   elif [[ "${GLM53_R22_V12_SMOKE:-0}" == 1 ]]; then
     ssh "$worker" docker run --rm --gpus all --entrypoint python3 "$image" \
       /opt/compose/smoke_r22_v12.py --gpu

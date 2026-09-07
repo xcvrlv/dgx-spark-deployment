@@ -229,7 +229,7 @@ class Tests(unittest.TestCase):
             self.assertIn(name+'='+value,docker);self.assertIn(name+': "'+value+'"',recipe)
         self.assertIn('0.87',recipe)
         build=(ROOT/'scripts/build-r22-dflash2-image.sh').read_text(encoding='utf-8')
-        self.assertEqual(build.count('/opt/compose/smoke_r22_v16.py --gpu'),2)
+        self.assertEqual(build.count('${GLM53_R22_SMOKE_SCRIPT:-smoke_r22_v16.py}'),2)
         self.assertLess(build.index('GLM53_R22_V16_SMOKE'),build.index('GLM53_R22_V12_SMOKE'))
 
     def test_inherited_timing_helpers_are_imported(self):
