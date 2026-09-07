@@ -78,6 +78,26 @@ def extracted(source, name, namespace):
 
 
 class Tests(unittest.TestCase):
+    def test_topk_oracle_accepts_boundary_ties_but_rejects_wrong_results(self):
+        smoke = load('smoke_r22_v18')
+        logits = np.array([[10.,9.,9.,9.,2.,1.], [1.,2.,7.,7.,8.,9.]])
+        lengths = np.array([6,6])
+        # Distinct valid selections at the boundary; output order is arbitrary.
+        for ids in (np.array([[0,1,2],[3,4,5]]), np.array([[3,0,2],[5,2,4]])):
+            smoke.assert_topk_result(ids, np.take_along_axis(logits,ids,axis=1), logits,lengths)
+        ids = np.array([[0,1,2],[3,4,5]])
+        values = np.take_along_axis(logits,ids,axis=1)
+        for bad in (np.array([[0,1,4],[3,4,5]]), np.array([[0,1,1],[3,4,5]]),
+                    ids[::-1], np.array([[-1,1,2],[3,4,5]]), np.array([[6,1,2],[3,4,5]])):
+            with self.assertRaises(AssertionError):
+                smoke.assert_topk_result(bad, np.take_along_axis(logits,np.clip(bad,0,5),axis=1), logits,lengths)
+        with self.assertRaises(AssertionError):
+            smoke.assert_topk_result(ids, values+1, logits,lengths)
+        with self.assertRaises(AssertionError):
+            smoke.assert_topk_result(ids, values*np.nan, logits,lengths)
+        with self.assertRaises(AssertionError):
+            smoke.assert_topk_result(ids, values, logits,np.array([2,6]))
+
     def source(self, name):
         if not BASE.is_dir(): self.skipTest('set GLM53_V18_BASELINE to pinned v17 sources')
         return (BASE/name).read_text(encoding='utf-8')

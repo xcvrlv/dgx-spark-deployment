@@ -86,18 +86,25 @@ Two independent switches allow A/B tests; restart all ranks after changing:
 
 ## Validation
 
-Six new CPU tests cover exact-source preflight and idempotence, rejection without
+Seven new CPU tests cover exact-source preflight and idempotence, rejection without
 partial writes, chunk coverage across requests and tails, sizing-only changes,
 the actual metadata kernel interpreted over NumPy with GPU `.item()` forbidden,
 DCP ownership for worlds 1/2/4 and interleave 1/16/64, conservative CPU bounds,
 trailing-page masking, fallbacks, retained decode code and cumulative smoke
-source verification.
+source verification. The top-k oracle accepts alternative boundary-tied IDs
+and rejects lower-score selections, duplicates, invalid IDs and mismatched scores.
 
 The GPU smoke adds exact legacy/compact metadata comparisons, independent
 enumerated ownership checks, changing live device lengths under graph replay,
 and real B12X prefill partitioned/coalesced top-k comparisons over two K
-supertiles. Top-k comparisons account for unspecified output column order and
-also check scores against the independent paged-logits reference. Kernel timings
+supertiles. Both runs are independently checked for valid unique IDs, scores
+matching their selected IDs and the correct top-k score multiset. The deliberately
+tie-heavy fixture may select different equally scored boundary IDs: the local
+B12X tiled selector uses atomics and does not promise stable-ID tie breaking.
+This differs from the separate stable DCP candidate reducer. The original v18
+smoke incorrectly required identical ID sets and stopped before the reference
+checks; this smoke-only correction preserves the score tolerances and changes
+no inference code. Kernel timings
 are diagnostic. All inherited v11-v17 GPU tests remain enabled, with the latest
 source hashes checked where v18 intentionally overlays an older file.
 

@@ -4,6 +4,31 @@ from pathlib import Path
 import sys
 
 
+def assert_topk_result(indices, scores, logits, lengths):
+    """Validate membership by score, allowing different IDs at an exact tie.
+
+    B12X's local tiled selector uses atomics to take the last tied candidates.
+    It does not promise the stable-ID ordering of the separate DCP reducer.
+    Inputs are CPU arrays so this oracle is also exercised by offline tests.
+    """
+    import numpy as np
+    ids, values, reference, lens = map(np.asarray, (indices, scores, logits, lengths))
+    assert ids.ndim == 2 and values.shape == ids.shape
+    assert reference.ndim == 2 and reference.shape[0] == ids.shape[0]
+    assert lens.shape == (ids.shape[0],)
+    assert np.issubdtype(ids.dtype, np.integer)
+    assert np.all((ids >= 0) & (ids < lens[:, None]) & (ids < reference.shape[1]))
+    ordered = np.sort(ids, axis=1)
+    assert np.all(ordered[:, 1:] != ordered[:, :-1]), 'duplicate top-k IDs'
+    assert np.isfinite(values).all(), 'non-finite top-k scores'
+    expected_at_ids = np.take_along_axis(reference, ids, axis=1)
+    np.testing.assert_allclose(values, expected_at_ids, rtol=1e-4, atol=1e-4)
+    topk = ids.shape[1]
+    expected = np.partition(reference, reference.shape[1] - topk, axis=1)[:, -topk:]
+    np.testing.assert_allclose(np.sort(values, axis=1), np.sort(expected, axis=1),
+                               rtol=1e-4, atol=1e-4)
+
+
 def metadata_gpu():
     import torch
     from vllm.v1.attention.backends.mla.gb10_indexer_prefill import build_paged_chunk, _causal_metadata
@@ -63,8 +88,8 @@ def partition_gpu():
     from smoke_r22_v14 import ms
     torch.manual_seed(5318)
     rows, heads, context, topk = 65, 4, 65536, 2048
-    # Integer dot products make score ties exact and expose partition-dependent
-    # membership changes without an ambiguous floating-point threshold.
+    # Deliberately tie-heavy. Local top-k may choose different equally scored
+    # IDs, so validate both selections against the full score oracle.
     q = torch.randint(-1, 2, (rows, heads, 128), device='cuda').to(torch.float8_e4m3fn)
     weights = torch.ones((rows, heads), dtype=torch.float32, device='cuda')
     cache = pack_index_k_cache_reference(torch.randint(-1, 2, (context, 128), device='cuda').float())
@@ -91,20 +116,15 @@ def partition_gpu():
         runs.append(run)
         outputs.append((indices, scores))
     torch.cuda.synchronize()
-    # Compare sorted (ID, score) pairs, not unspecified output column order.
-    old_ids, new_ids = (torch.sort(out[0], dim=1) for out in outputs)
-    torch.testing.assert_close(old_ids.values, new_ids.values, rtol=0, atol=0)
-    torch.testing.assert_close(outputs[0][1].gather(1, old_ids.indices),
-                               outputs[1][1].gather(1, new_ids.indices), rtol=1e-4, atol=1e-4)
     logits = paged_decode_logits_reference(q_fp8=q, weights=weights, index_k_cache=cache,
         real_page_table=table, query_row_to_batch=torch.arange(rows, device='cuda', dtype=torch.int32),
         seqlens_per_query=lens)
-    ids, scores = outputs[1]
-    assert bool(torch.all((ids >= 0) & (ids < lens[:, None])))
-    assert bool(torch.all(new_ids.values[:, 1:] != new_ids.values[:, :-1]))
-    torch.testing.assert_close(scores, logits.gather(1, ids.long()), rtol=1e-4, atol=1e-4)
-    torch.testing.assert_close(torch.sort(scores, dim=1).values,
-        torch.sort(torch.topk(logits, topk, dim=1).values, dim=1).values, rtol=1e-4, atol=1e-4)
+    reference, lengths = logits.cpu().numpy(), lens.cpu().numpy()
+    for name, (ids, scores) in zip(('partitioned', 'coalesced'), outputs):
+        try:
+            assert_topk_result(ids.cpu().numpy(), scores.cpu().numpy(), reference, lengths)
+        except AssertionError as exc:
+            raise AssertionError(f'v18 {name} top-k failed the independent oracle') from exc
     return dict(v18_paged_partition='passed', v18_partitioned_ms=ms(runs[0]), v18_coalesced_ms=ms(runs[1]))
 
 
@@ -117,6 +137,7 @@ def main():
     result = dict(continuation_overlay=VERSION)
     if '--gpu' in sys.argv:
         result.update(metadata_gpu())
+        print(json.dumps(result, sort_keys=True), flush=True)
         result.update(partition_gpu())
     print(json.dumps(result, sort_keys=True), flush=True)
 
