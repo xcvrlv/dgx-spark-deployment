@@ -214,7 +214,6 @@ command: |
     --enable-chunked-prefill \
     --enable-prefix-caching \
     --async-scheduling \
-    --disable-custom-all-reduce \
     --reasoning-parser glm45 \
     --tool-call-parser glm47 \
     --enable-auto-tool-choice \

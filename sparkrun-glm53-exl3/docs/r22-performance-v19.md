@@ -131,6 +131,39 @@ router weights, ragged routes and empty experts. M16 permits bounded rounding
 differences from the changed FC1 row geometry; its relative RMS error must
 stay below 0.5%, with a separate per-element check.
 
-Use M32/group2 to recover the previous schedule, or use the v18 image/recipe
-for full rollback. v19 preserves utilization, KV/graph budgeting, batching,
-prefix policy, dense quantization, MTP and network settings.
+Use M32/group2 to recover the previous compute schedule. v19 preserves
+utilization, KV/graph budgeting, batching, prefix policy, dense quantization
+and MTP. Its recipe also removes the RoCEnante-disabling CLI flag described
+below; keep that correction when comparing compute versions.
+
+## SparkRun / RoCEnante recipe correction
+
+The inherited `--disable-custom-all-reduce` argument disables R22's global
+`_ENABLE_CUSTOM_ALL_REDUCE` gate. Both TP RoCEnante selection and our patched
+DCP selection depend on that gate, even when their environment variables
+are enabled. This flag has been removed from the v19 recipe. No image rebuild
+is needed for this recipe correction; restart all serving workers.
+
+The recipe already supplies host networking, RDMA devices, unlimited memlock,
+the dual HCA list, GID index 3, and TP/DCP RoCEnante environment settings.
+SparkRun's native vLLM runtime passes the recipe environment to its containers
+and adds node-specific distributed arguments. PCIe custom all-reduce remains
+disabled via its separate environment setting.
+
+The isolated GPU smoke creates communicators directly without the serving CLI
+flag. Its success therefore did not establish that the serving recipe enabled
+RoCEnante. A new CPU regression executes both pinned communicator selection
+regions and reproduces this difference. Physical connectivity and actual
+serving dispatch still need cluster verification.
+
+After restarting, inspect the serving logs for `Using RoCEnante (b12x one-shot
+RoCE collectives)` or `RoCEnante ready: world=4`, then after inference for
+`RoCEnante all-reduce is live`, `RoCEnante all-gather is live`, or
+`v16: DCP RoCEnante gather into existing workspace active`. Startup readiness
+alone does not demonstrate that inference tensors took that path. The ready
+message is rank-zero-only, so do not require it in every worker's log.
+
+If earlier runs used the unchanged disabling flag, their transport was not
+RoCEnante despite the enabled environment settings. Enabling it also allocates
+registered communication buffers; remeasure startup memory before increasing
+utilization at the same time.

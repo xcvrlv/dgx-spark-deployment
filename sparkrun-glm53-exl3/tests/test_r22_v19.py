@@ -155,7 +155,10 @@ class Tests(unittest.TestCase):
         restored = after.replace('r22-v19-mtp', 'r22-v18-mtp').replace('sm121-v19', 'sm121-v18')
         restored = '\n'.join(line for line in restored.split('\n') if not any(k in line for k in
             ('v19_overlay:', 'VLLM_GB10_EXL3_FC2_GROUP:')))
-        self.assertEqual(restored, before)
+        # RoCEnante shares R22's global custom-AR enable gate. v18's CLI
+        # flag disabled it despite the transport environment settings.
+        self.assertEqual(restored, before.replace('    --disable-custom-all-reduce \\\n', ''))
+        self.assertNotIn('--disable-custom-all-reduce', after)
         builder = (ROOT/'scripts/build-r22-v19-image.sh').read_text(encoding='utf-8')
         self.assertIn('for version in 11 12 13 14 15 16 17 18;', builder)
         self.assertIn('GLM53_R22_SMOKE_SCRIPT=smoke_r22_v19.py', builder)
