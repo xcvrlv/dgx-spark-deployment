@@ -420,3 +420,12 @@ baseline. Build with
 `bash sparkrun-glm53-exl3/scripts/build-r22-v19-image.sh WORKER1 WORKER2 WORKER3`
 and use `recipes/glm53-exl3-v19-4x.yaml`. See
 [v19 tuning, GPU qualification and expert-parallel findings](docs/r22-performance-v19.md).
+
+The **v20** candidate stripes only the ragged final FC1 wave of route-packed
+M8 decode/MTP plans along K across every CTA, reusing the existing slice/lock
+finalize. Prefill, FC2 grouping and the M32 plan compile unchanged; one
+decode token routed to eight experts fills one 48-SM wave plus a 16-tile
+remainder that otherwise idles 32 SMs. Build with
+`bash sparkrun-glm53-exl3/scripts/build-r22-v20-image.sh WORKER1 WORKER2 WORKER3`
+and use `recipes/glm53-exl3-v20-4x.yaml`. See
+[v20 scope, schedule math and rollback](docs/r22-performance-v20.md).
