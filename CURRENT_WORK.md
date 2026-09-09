@@ -9,19 +9,24 @@ user-observed measurement; nothing here is GPU-qualified on the dev host.
 
 ## State of the candidate line
 
-- **v20 (new, this session): GB10 FC1 whole-tile tail split.** Implemented,
-  CPU-tested, hash-pinned; needs Spark build + GPU smoke + serving A/B. See
-  `sparkrun-glm53-exl3/docs/r22-performance-v20.md`. This is the FC1-tail
-  candidate from `docs/sm121-kernel-opportunity-map.md`, scoped to
-  route-packed M8 decode/MTP plans only.
+- **v20 (built, served; MTP3 serving user-observed similar; target-only now
+  measured): keep v20 as the serving baseline.** The matched target-only
+  comparison (entries 1-2 in `TARGET-ONLY-PERFORMANCE.md`, 2026-09-08) shows:
+  v20 prefill trails safe by ~96 tok/s at 8k (645 vs 741; ~112 at 64k, ~83 at
+  128k) — the long-standing prefill gap persists and is now quantified; v20
+  decode at ctx 0 (30-second samples) wins at conc 4 (+19.6%) and 8 (+5.1%),
+  trails at conc 1 (-4.3%) and 2 (-7.2%). The keep-v20 decision rests on the
+  MTP3 serving parity plus the production-concurrency decode wins; the clean
+  tail-split isolation is a `TAILSPLIT=0` vs `1` target-only A/B.
+  See `sparkrun-glm53-exl3/docs/r22-performance-v20.md` for scope and rollback.
 - v19 remains the rollback: M32 prefill, `VLLM_GB10_EXL3_FC2_GROUP=4`
   (user-observed slightly faster than group2), M16 now compilable, and the
   recipe no longer carries `--disable-custom-all-reduce`.
 - User-observed performance context: the historical "safe" image (recipe
-  `glm53-exl3-4x-safe.yaml`) still holds the best prefill at over 700 t/s
-  for the 8k uncached prefill sample; v19 sits around 650 t/s prefill with
-  higher decode. v13 closed most of the prefill gap (to under 100 t/s of
-  safe at the time); the remaining prefill difference is unexplained.
+  `glm53-exl3-4x-safe.yaml`) holds the best prefill (741/757/711 t/s at
+  8k/64k/128k, target-only); v20 sits at 645/645/628 target-only. The
+  safe-vs-v10..20 scheduling-difference inventory and the EXL3 kernel-path
+  streamlining study (longer-horizon) live in `EXL3-SCHEDULING-NOTES.md`.
 
 ## What was mapped this session
 
@@ -137,26 +142,95 @@ overhead will eat part of that. No end-to-end percentage is claimed.
     compares v19-to-v20 and is unaffected.
 - Memory-utilization 0.89 attempt (with v17 startup reclaim) is a separate,
   orthogonal experiment; do not mix it into the v20 decode A/B.
+- **[user-observed] `instanttensor` model loading is much faster** than the
+  R22 line's `safetensors` mmap load and should be enabled for the latest
+  recipes too. It is already in the safe recipe command
+  (`--load-format instanttensor`, `glm53-exl3-4x-safe.yaml`); every R22-line
+  recipe (v10..v20) still pins `--load-format safetensors`. This is a
+  startup/model-load observation, not a throughput claim. Enable it as a
+  recipe correction: first verify the R22 image's vLLM accepts the
+  `instanttensor` load format (it is a different vLLM release than the safe
+  image's R7 lineage), then flip the recipe value and restart all workers.
 
 ## Next steps
 
-1. Build v20 on a Spark:
-   `bash sparkrun-glm53-exl3/scripts/build-r22-v20-image.sh WORKER1 WORKER2
-   WORKER3` (distributes, verifies image IDs, runs the cumulative GPU smoke
-   on all four nodes - includes the new tail-split shape ladder with
-   timings).
-2. Serving A/B with the existing benchmark (8k uncached prefill sample,
-   decode at concurrency 1 and 8, medians, MTP acceptance from
-   instrumentation): recipe `glm53-exl3-v20-4x.yaml` first with
-   `VLLM_GB10_EXL3_FC1_TAILSPLIT: "0"` then `"1"` (restart all workers; one
-   env change at a time). Decode is the target metric; prefill should be
-   unaffected (verify with the prefill sample anyway).
-3. If v20 wins: consider the FC2 decoded-weight reuse experiment (v21) with
-   the ptxas-register gate; if it loses, the timing JSON from the smoke's
-   shape ladder localizes which remainder sizes regressed.
+1. Target-only decode on v20 is **measured** (entries 1-2 in
+   `TARGET-ONLY-PERFORMANCE.md`). The 300-second safe arm is now recorded
+   (entry 5): safe wins conc 1 (+18.3%) and 2 (+9.0%); v20 wins conc 4
+   (+6.6%) and 8 (+6.4%) - the same v20-wins-at-production-concurrency shape
+   as the 30-second comparison. **Still unresolved: the `TAILSPLIT=1` arm**
+   (entry 4 is byte-identical to the `=0` arm) - verify engagement first
+   (set `VLLM_GB10_EXL3_FC1_TAILSPLIT: "2"` briefly; the helper raises at
+   GEMM compile if the env is read), then rerun the intended arm or replace
+   the table. Do not compare entry 3 against entry 2 (30 s vs 300 s).
+2. Capture the safe image's `exl3.py` / `kernel.py` / `mixed_trellis.py`
+   SHA-256 on a Spark (command in `EXL3-SCHEDULING-NOTES.md` §1.5) to close
+   the lineage-identity question.
+3. Ranked streamlining candidates and their first gates are tracked in
+   `EXL3-SCHEDULING-NOTES.md` §3-4 (decode blocks_per_sm=2 spike, route-pack
+   fusion trace, topk_sum/FC2-epilogue and FC2-weight-reuse ptxas gates).
+   Old v20-era steps below are done or superseded.
 4. Optional parallel experiment: `gpu_memory_utilization` 0.88/0.89 with
    v17's reclamation enabled, observing the `GB10 startup memory` boundary
    logs first (per the v17 doc).
+5. **Blocked pending crash investigation (2026-09-08):** user reports a
+   segmentation fault when trying InstantTensor with v20. Do not promote
+   `--load-format instanttensor` to the latest recipes based on safe-image
+   success or format recognition alone. Keep `safetensors` as the working
+   baseline until this exact stack passes loading and serving. See the
+   priority queue entry below; this supersedes the earlier recipe-flip advice.
+
+## Priority issue queue: v20 InstantTensor segmentation fault
+
+- **User-observed, 2026-09-08:** attempting InstantTensor with v20 segfaults.
+  Worker log now supplied: rank 0 / pid 206 initializes at 16:39:21 via
+  `tcp://10.3.10.1:25000`; vLLM reports NCCL 2.30.7 from
+  `/opt/sparkring/nccl/libnccl.so.2`. TP and DCP RoCEnante initialize
+  successfully. Model loading starts at 16:39:44, then the InstantTensor
+  progress bar shows `0.00/331G` followed by `!!!!!!! Segfault encountered
+  !!!!!!!`. Failure is during startup loading, before any reported loading
+  progress, not a serving FC1-tail-split failure. Progress reporting is
+  throttled, so 0% does not prove no tensors were processed. No native stack
+  is present; later WorkerProc/EngineCore traces report worker loss only.
+  Attachment: `C:/Users/Juho/.codex/attachments/3f7d7184-0738-4e9c-824e-17bf09386394/pasted-text.txt`.
+- **Interpretation limits:** 331G is the iterator's logical selected tensor
+  total, not evidence that 331G was allocated on one Spark. No explicit OOM,
+  earlyoom action or RoCEnante timeout is shown. SymmMem's unsupported-12.1
+  warning is followed by successful B12X/PyNCCL selection; do not treat that
+  warning or the generic torch.compile warning as the demonstrated cause.
+  vLLM's PyNCCL version log does not identify all libraries loaded by native
+  InstantTensor or Torch's ProcessGroupNCCL; inspect actual mappings.
+- **Verified in repo:** the checked-in v20 recipe still uses `safetensors`.
+  Its image inherits InstantTensor from the ARM64 base; the base Dockerfile
+  checks only package metadata `instanttensor >= 0.1.9`. That check and the
+  ordinary smoke do not qualify real InstantTensor model loading on the
+  CUDA 13 / Torch 2.13 stack. v20's new code changes FC1 inference scheduling,
+  not the loader. A crash confirmed inside loading should be investigated
+  there before attributing it to tail splitting.
+- **Candidates, not diagnoses:** native I/O/CUDA or binary-library
+  compatibility; distributed NCCL loading; staging allocation pressure;
+  interaction between EXL3 streaming tensor ownership and reusable buffers.
+  The R22 iterator fixture accepts a world-group NCCL process group and
+  supports `copy=False`, marking tensors `_vllm_instanttensor_borrowed`.
+  The restored EXL3 adapter already clones borrowed tensors in multiple
+  paths, so a blanket assertion that ownership protection is missing would
+  be wrong. Audit actual call-site settings and remaining retention paths.
+- **Next evidence/gates:** obtain the native crash
+  information (`PYTHONFAULTHANDLER=1` for Python context, native core/backtrace
+  if available); compare loaded InstantTensor/Torch/CUDA/NCCL libraries with
+  safe; isolate one small local safetensors file before a four-rank load;
+  test supported I/O backend choices only after checking the installed
+  package API. Inspect buffer-size and distributed/copy controls in the
+  actual installed default loader before recommending flags. Separate
+  staging-memory pressure from SIGSEGV: earlyoom SIGTERM/OOM SIGKILL are
+  different failure modes. Retain the working safetensors load for serving.
+- **Scope:** investigation queued, no image/recipe/kernel fix implemented.
+  Safe-image InstantTensor success does not establish R22 compatibility.
+- Sources: `Dockerfile.r22-dflash2:152`, `Dockerfile.r22-dflash2-v20`,
+  `tmp/exl3-v17/raw/model_executor/model_loader/weight_utils.py:1206`,
+  `tmp/exl3-v16/base/vllm/model_executor/layers/quantization/exl3.py:1789,2495`.
+  Upstream buffer-lifetime/distributed-loading contracts:
+  https://github.com/scitix/InstantTensor#zero-copy-mode
 
 ## File inventory for v20
 
@@ -175,3 +249,18 @@ overhead will eat part of that. No end-to-end percentage is claimed.
 - `sparkrun-glm53-exl3/tests/test_r22_v20.py` - 8 CPU regression gates.
 - `sparkrun-glm53-exl3/docs/r22-performance-v20.md` - full scope, math and
   rollback documentation.
+
+
+## v20 InstantTensor revision 1 prepared (2026-09-09)
+
+Supersedes the earlier "no image/recipe/kernel fix implemented" investigation
+scope: a separate loading-policy candidate is now built on head 10.3.10.1,
+`spark-vllm-glm53-exl3:r22-dflash2-sm121-v20-instanttensor-r1`. It uses buffered
+local loading, bounded staging and explicit owned copies, retaining v20
+compute and MTP settings. Source gates and parsed recipe parity passed.
+No confirmed segfault fix or inference improvement yet: a preliminary GPU
+probe hit CUDA OOM before loading while the existing service was running.
+The original service remains up; worker distribution and GPU/full-model A/B
+qualification await an idle window. See
+`sparkrun-glm53-exl3/docs/r22-instanttensor-v20-r1.md` for evidence, exact image
+IDs, build/launch commands, test gates and rollback.

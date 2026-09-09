@@ -1,0 +1,17 @@
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v20
+
+# Keep the v20 compute/runtime binaries. The installed InstantTensor Python
+# implementation matches safe; this revision isolates its loading policy.
+ENV INSTANTTENSOR_BACKEND=BUFFERED \
+    INSTANTTENSOR_BUFFER_SIZE=536870912 \
+    INSTANTTENSOR_MAX_FREE_MEM_USAGE=0.05 \
+    INSTANTTENSOR_CHUNK_SIZE=8388608 \
+    INSTANTTENSOR_CONCURRENCY=1 \
+    INSTANTTENSOR_IO_DEPTH=8 \
+    PYTHONFAULTHANDLER=1
+
+# R22 uses model-loader-extra-config for copy/distributed, not the old
+# INSTANTTENSOR_COPY environment variable. The companion recipe sets both.
+COPY overlay/smoke_r22_instanttensor.py /opt/compose/
+RUN python3 /opt/compose/smoke_r22_instanttensor.py
+LABEL local-inference.instanttensor-overlay="glm53-r22-v20-instanttensor-r1"
