@@ -270,6 +270,11 @@ class Tests(unittest.TestCase):
     def test_pair_fixture_tiles_preserve_fused_thread_contract(self):
         source = (ROOT/'overlay/smoke_r22_v21.py').read_text(encoding='utf-8')
         tiles = extract(source, 'pair_test_tiles', {})
+        tree = ast.parse(self.k_after)
+        registers = next(ast.literal_eval(node.value) for node in tree.body
+                         if isinstance(node, ast.Assign) and any(
+                             isinstance(target, ast.Name) and target.id == '_W4A16_REGS_SM121'
+                             for target in node.targets))
         for tiers in (2, 3):
             k1, n1, k2, n2 = tiles(tiers)
             self.assertGreaterEqual(k1, 128)
@@ -278,8 +283,13 @@ class Tests(unittest.TestCase):
             self.assertEqual(1024 % n1, 0)
             self.assertEqual(512 % k2, 0)
             self.assertEqual(6144 % n2, 0)
+            for block in (8, 32, 64):
+                for k, n, m in ((k1, n1, block), (k2, n2, 8)):
+                    key = (k*n//64, (m+15)//16, n//16, k//16, m == 8)
+                    self.assertIn(key, registers,
+                                  f'{tiers}-tier M{block} fixture has no register entry: {key}')
         self.assertEqual(tiles(2), (128, 128, 32, 512))
-        self.assertEqual(tiles(3), (128, 64, 32, 256))
+        self.assertEqual(tiles(3), (128, 64, 64, 128))
 
     def test_pair_launch_allocation_can_remain_fc1_dominated(self):
         source = (ROOT/'overlay/smoke_r22_v21.py').read_text(encoding='utf-8')

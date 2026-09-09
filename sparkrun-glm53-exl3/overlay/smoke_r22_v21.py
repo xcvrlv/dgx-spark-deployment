@@ -16,8 +16,9 @@ def check_pair_launches(baseline, paired):
 
 def pair_test_tiles(tier_count):
     # Fused FC1/FC2 require equal thread counts (tile_k * tile_n / 64).
-    # K5/M64 needs narrower FC1 N, so narrow FC2 N correspondingly.
-    return (128, 64, 32, 256) if tier_count == 3 else (128, 128, 32, 512)
+    # K5/M64 needs narrower FC1 N. FC2 K64/N128 has the same thread
+    # count and an existing SM121 register entry; K32/N256 does not.
+    return (128, 64, 64, 128) if tier_count == 3 else (128, 128, 32, 512)
 
 
 def fc2_pair_gpu():
