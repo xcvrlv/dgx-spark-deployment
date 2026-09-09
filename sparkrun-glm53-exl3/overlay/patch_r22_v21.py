@@ -16,7 +16,7 @@ INPUTS = {
     MIXED: 'e2e645f569c26b626900e1e15ee672becce82cd1587c7edb0d5e9b1cb20cce41',
 }
 OUTPUTS = {
-    KERNEL: '680e52351266717150abc618d19d80dfbb0449b4222753a45874efd1593e62a1',
+    KERNEL: 'dbd01ae533a322cfcf390aee39c69e5b6295ce19ec7721a60aa53364d0f19f64',
     MIXED: '7c38f9b33d40515b60d28785f15b7ff1510866da8631e9bec1d336f5247fbea6',
 }
 
@@ -1237,6 +1237,29 @@ def transform_kernel(text):
         '            schedule_route_block_factor=self.fc2_schedule_route_block_factor,\n'
         '            paired_m8_routes=self.fc2_paired_m8_routes,\n'
         '        )\n')
+    # Unpaired M8/large-M callers share the expanded staging helpers.
+    # Supply an unused second-half bound and disable paired staging.
+    for helper, indent, count, operands in (
+        ('_prefetch_initial_tiles', 12, 2,
+         ('a_bf16_flat', 'a_alt_bf16_flat', 'b_i32_flat', 'scales_i32_flat',
+          'smem_base', 'tid', 'k_tiles', 'reduce_k_tile')),
+        ('_prefetch_pipeline_step', 28, 1,
+         ('a_bf16_flat', 'a_alt_bf16_flat', 'b_i32_flat', 'scales_i32_flat',
+          'smem_base', 'tid', 'pipe', 'kk', 'tile_idx', 'k_tiles', 'reduce_k_tile')),
+    ):
+        pad = ' ' * indent
+        prefix = 'self.' + helper + '(\n' + ''.join(
+            pad + value + ',\n' for value in operands)
+        before = prefix + pad + 'block_valid_rows,\n' + pad + 'a_gl_stride,\n'
+        after = prefix + ''.join(pad + value + ',\n' for value in
+                                 ('block_valid_rows', 'Int32(0)', 'False', 'a_gl_stride'))
+        text = replace(text, before, after, count=count)
+    # Large-M output drains always start at metadata row zero. M8 callers
+    # already forward their explicit metadata_row_base above.
+    text = replace(text,
+        '                block_valid_rows,\n                store_iters,\n',
+        '                block_valid_rows,\n                Int32(0),\n'
+        '                store_iters,\n', count=2)
     return text
 
 

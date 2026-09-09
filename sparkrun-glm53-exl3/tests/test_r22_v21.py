@@ -2,6 +2,7 @@
 import ast
 import hashlib
 import importlib.util
+import inspect
 import os
 from pathlib import Path
 import sys
@@ -88,6 +89,45 @@ class Tests(unittest.TestCase):
             previous = target.read_bytes()
             with self.assertRaises(RuntimeError): p.patch(root)
             self.assertEqual(target.read_bytes(), previous)
+
+    def test_kernel_method_call_signatures(self):
+        """Bind actual generated self-calls, including inactive GPU branches."""
+        tree = ast.parse(self.k_after)
+        checked = 0
+        for cls in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+            methods = {node.name: node for node in cls.body
+                       if isinstance(node, ast.FunctionDef)}
+            for caller in methods.values():
+                for call in ast.walk(caller):
+                    if not (isinstance(call, ast.Call)
+                            and isinstance(call.func, ast.Attribute)
+                            and isinstance(call.func.value, ast.Name)
+                            and call.func.value.id == 'self'
+                            and call.func.attr in methods):
+                        continue
+                    if any(isinstance(arg, ast.Starred) for arg in call.args) or any(
+                            kw.arg is None for kw in call.keywords):
+                        continue
+                    target = methods[call.func.attr]
+                    # Keep Python's binding rules, dropping only DSL annotations
+                    # and default expressions that require CUDA imports.
+                    args = ast.parse(ast.unparse(target)).body[0].args
+                    for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
+                        arg.annotation = None
+                    args.defaults = [ast.Constant(None) for _ in args.defaults]
+                    args.kw_defaults = [None if value is None else ast.Constant(None)
+                                        for value in args.kw_defaults]
+                    stub = ast.FunctionDef(name='stub', args=args,
+                        body=[ast.Pass()], decorator_list=[])
+                    namespace = {}
+                    exec(compile(ast.fix_missing_locations(ast.Module(
+                        body=[stub], type_ignores=[])), '<signature>', 'exec'), namespace)
+                    with self.subTest(caller=caller.name, helper=target.name, line=call.lineno):
+                        inspect.signature(namespace['stub']).bind(
+                            None, *[None for _ in call.args],
+                            **{kw.arg: None for kw in call.keywords})
+                    checked += 1
+        self.assertGreater(checked, 100)
 
     def test_helper_architecture_and_value_gating(self):
         def helper(capability=(12, 1)):
