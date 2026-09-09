@@ -267,6 +267,20 @@ class Tests(unittest.TestCase):
                 if group >= 2:
                     self.assertIn(group, (2, 4))
 
+    def test_pair_fixture_tiles_preserve_fused_thread_contract(self):
+        source = (ROOT/'overlay/smoke_r22_v21.py').read_text(encoding='utf-8')
+        tiles = extract(source, 'pair_test_tiles', {})
+        for tiers in (2, 3):
+            k1, n1, k2, n2 = tiles(tiers)
+            self.assertGreaterEqual(k1, 128)
+            self.assertEqual(k1*n1//64, k2*n2//64)
+            self.assertEqual(6144 % k1, 0)
+            self.assertEqual(1024 % n1, 0)
+            self.assertEqual(512 % k2, 0)
+            self.assertEqual(6144 % n2, 0)
+        self.assertEqual(tiles(2), (128, 128, 32, 512))
+        self.assertEqual(tiles(3), (128, 64, 32, 256))
+
     def test_pair_launch_allocation_can_remain_fc1_dominated(self):
         source = (ROOT/'overlay/smoke_r22_v21.py').read_text(encoding='utf-8')
         check = extract(source, 'check_pair_launches', {})

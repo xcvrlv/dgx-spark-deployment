@@ -14,6 +14,12 @@ def check_pair_launches(baseline, paired):
         "pair unexpectedly reduced the fused shared footprint"
 
 
+def pair_test_tiles(tier_count):
+    # Fused FC1/FC2 require equal thread counts (tile_k * tile_n / 64).
+    # K5/M64 needs narrower FC1 N, so narrow FC2 N correspondingly.
+    return (128, 64, 32, 256) if tier_count == 3 else (128, 128, 32, 512)
+
+
 def fc2_pair_gpu():
     import torch
     from b12x.moe._shared.kernels.w4a16 import mixed_trellis as api
@@ -32,9 +38,10 @@ def fc2_pair_gpu():
             hidden, intermediate, topk = 6144, 512, 8
             # K5 + M64 exceeds GB10's opt-in shared-memory limit with
             # FC1 N128. Narrow N for the three-tier fixture, retaining K128
-            # (required for cross-tier reductions) and the same FC2 tiles.
+            # (required for cross-tier reductions). FC2 N must also shrink
+            # to preserve the fused kernel's matching thread counts.
             # Prepare weights and compile both A/B arms with this layout.
-            tiles = (128, 64 if len(counts) == 3 else 128, 32, 512)
+            tiles = pair_test_tiles(len(counts))
             shared = [torch.ones(1, hidden, device=device, dtype=torch.float16) for _ in range(3)]
             shared[1].mul_(.75)
             tiers = [prepare_trellis256_moe_weights(
