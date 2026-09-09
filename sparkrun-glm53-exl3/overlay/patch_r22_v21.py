@@ -17,7 +17,7 @@ INPUTS = {
 }
 OUTPUTS = {
     KERNEL: 'dbd01ae533a322cfcf390aee39c69e5b6295ce19ec7721a60aa53364d0f19f64',
-    MIXED: '7c38f9b33d40515b60d28785f15b7ff1510866da8631e9bec1d336f5247fbea6',
+    MIXED: 'd6840540c365f4c08b1a42ddf7ca884aa5385c9e1f4e1e91a87a0b2fb480e831',
 }
 
 HELPER = '''def _gb10_fc2_m8_pair_enabled() -> bool:
@@ -1343,8 +1343,10 @@ PAIR_CONTRACT_ANCHOR = '''                "mixed Trellis FC2 schedule factor mus
 PAIR_CONTRACT_NEW = '''                "mixed Trellis FC2 schedule factor must divide one packed "
                 f"route block: factor={fc2_factor}, maximum={expected_factor}"
             )
-        expected_pair = fc2_factor in (2, 4) and driver.fc2.moe_block_size == 8
-        if bool(driver.fc2.paired_m8_routes) != expected_pair:
+        # Eligible geometry permits pairing; the compile-time switch may
+        # still disable it for the baseline and inherited GPU checks.
+        pair_eligible = fc2_factor in (2, 4) and driver.fc2.moe_block_size == 8
+        if driver.fc2.paired_m8_routes and not pair_eligible:
             raise ValueError(
                 "mixed Trellis FC2 pair contract mismatch: "
                 f"factor={fc2_factor}, m={driver.fc2.moe_block_size}, "

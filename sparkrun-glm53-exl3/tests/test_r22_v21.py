@@ -168,6 +168,35 @@ class Tests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 construct(*args)
 
+    def test_mixed_pair_contract_allows_disabled_pairing(self):
+        # Execute the actual generated validation in both mixed constructors,
+        # including the old equality check to reproduce the reported failure.
+        contracts = []
+        for cls in (n for n in ast.walk(ast.parse(self.m_after))
+                    if isinstance(n, ast.ClassDef)):
+            for method in cls.body:
+                if not isinstance(method, ast.FunctionDef) or method.name != '__init__':
+                    continue
+                for index, node in enumerate(method.body):
+                    if (isinstance(node, ast.If)
+                            and 'mixed Trellis FC2 pair contract mismatch:' in ast.unparse(node)):
+                        contracts.append(ast.Module(body=method.body[index-1:index+1],
+                                                    type_ignores=[]))
+        self.assertEqual(len(contracts), 2)
+        for contract in contracts:
+            code = compile(ast.fix_missing_locations(contract), '<pair-contract>', 'exec')
+            for factor in (1, 2, 3, 4):
+                for block in (8, 16, 32, 64):
+                    for enabled in (False, True):
+                        ns = dict(fc2_factor=factor, driver=NS(fc2=NS(
+                            moe_block_size=block, paired_m8_routes=enabled)))
+                        with self.subTest(factor=factor, block=block, enabled=enabled):
+                            if enabled and (factor not in (2, 4) or block != 8):
+                                with self.assertRaisesRegex(ValueError, 'pair contract mismatch'):
+                                    exec(code, ns)
+                            else:
+                                exec(code, ns)
+
     def test_pair_dispatch_model_keeps_expert_boundaries_and_locks(self):
         """Python model of the v21 dispatcher conditional: each pair call
         covers two adjacent M8 subtiles within one packed block, and every
