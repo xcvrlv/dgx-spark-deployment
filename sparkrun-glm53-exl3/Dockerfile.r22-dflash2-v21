@@ -1,0 +1,18 @@
+FROM spark-vllm-glm53-exl3:r22-dflash2-sm121-v20-instanttensor-r1
+COPY overlay/patch_r22_v21.py overlay/smoke_r22_v21.py /opt/compose/
+# v21's cumulative validation drives the v20 GPU stage directly; its entrypoint
+# function must stay importable beside this layer.
+COPY overlay/smoke_r22_v20.py /opt/compose/
+RUN python3 - <<'PY'
+from pathlib import Path
+import sys
+import b12x
+sys.path.insert(0, '/opt/compose')
+from patch_r22_v21 import patch
+for root in (Path('/opt/b12x-r22/b12x'), Path(b12x.__file__).parent):
+    patch(root)
+    patch(root, check=True)
+PY
+ENV VLLM_GB10_EXL3_FC2_M8_PAIR=0
+RUN python3 /opt/compose/smoke_r22_v21.py
+LABEL local-inference.v21-overlay="glm53-r22-v21-1"

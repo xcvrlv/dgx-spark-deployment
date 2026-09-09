@@ -264,3 +264,23 @@ The original service remains up; worker distribution and GPU/full-model A/B
 qualification await an idle window. See
 `sparkrun-glm53-exl3/docs/r22-instanttensor-v20-r1.md` for evidence, exact image
 IDs, build/launch commands, test gates and rollback.
+
+## v21: archived R7 paired FC2 M8 weight reuse as a prefill option (2026-09-09)
+
+Implements the plan's Priority 1: the archived R7 pair kernel
+(`_run_tile_m8_pair` + `_run_mma_pipeline_m8_pair` + `_read_moe_block_data_pair`
++ `_tile_common_prologue_pair` + `_load_next_fragment_bundle_m8_pair`) is
+adapted into an R22 prefill option, layered on the working v20-instanttensor-r1
+image. The paired kernel decodes one weight fragment per pair of adjacent M8
+subtiles and applies it to both accumulator sets with independent A operands;
+production group4 dispatches as two pair calls and group2 as one; M8 decode
+keeps factor 1 and never reaches the pair path. Each M8 half keeps its own
+padded 16-row shared-memory slab and output metadata rows (the doubled A slab
+and route/rd-route/top-k regions grow the shared footprint; the valid-count
+slot stays a single region). The switch is read during GEMM compilation and is
+part of every affected cache key; the mixed-pair contract raises a mismatch
+between the fused flag and the stock schedule. Source gates and parsed recipe
+parity passed. No confirmed inference improvement yet: ptxas register/spill
+inspection and paired-FC2 numerical qualification await an idle GPU window.
+See `sparkrun-glm53-exl3/docs/r22-performance-v21.md` for the evidence, exact
+image identity, build/launch commands, test gates and rollback.
