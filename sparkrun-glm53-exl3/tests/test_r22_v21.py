@@ -267,6 +267,17 @@ class Tests(unittest.TestCase):
                 if group >= 2:
                     self.assertIn(group, (2, 4))
 
+    def test_pair_launch_allocation_can_remain_fc1_dominated(self):
+        source = (ROOT/'overlay/smoke_r22_v21.py').read_text(encoding='utf-8')
+        check = extract(source, 'check_pair_launches', {})
+        baseline = NS(compiled=object(), shared_memory_bytes=68096)
+        for size in (68096, 76288):
+            check(baseline, NS(compiled=object(), shared_memory_bytes=size))
+        with self.assertRaisesRegex(AssertionError, 'stale kernel cache key'):
+            check(baseline, NS(compiled=baseline.compiled, shared_memory_bytes=76288))
+        with self.assertRaisesRegex(AssertionError, 'reduced'):
+            check(baseline, NS(compiled=object(), shared_memory_bytes=51456))
+
     def test_cumulative_smoke_merges_overrides(self):
         source = (ROOT/'overlay/smoke_r22_v21.py').read_text(encoding='utf-8')
         seen = []
