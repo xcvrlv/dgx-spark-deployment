@@ -30,7 +30,11 @@ def fc2_pair_gpu():
     try:
         for counts in ((8, 8), (6, 5, 5)):
             hidden, intermediate, topk = 6144, 512, 8
-            tiles = (128, 128, 32, 512)
+            # K5 + M64 exceeds GB10's opt-in shared-memory limit with
+            # FC1 N128. Narrow N for the three-tier fixture, retaining K128
+            # (required for cross-tier reductions) and the same FC2 tiles.
+            # Prepare weights and compile both A/B arms with this layout.
+            tiles = (128, 64 if len(counts) == 3 else 128, 32, 512)
             shared = [torch.ones(1, hidden, device=device, dtype=torch.float16) for _ in range(3)]
             shared[1].mul_(.75)
             tiers = [prepare_trellis256_moe_weights(
@@ -141,7 +145,8 @@ def fc2_pair_gpu():
                     timings.append(dict(fc2_pair=flag, ms=ms(runs[flag]),
                         blocks_per_sm=launches[flag].blocks_per_sm,
                         shared_bytes=launches[flag].shared_memory_bytes))
-                row = dict(tiers=len(counts), rows=rows, packed_blocks=tiles_routed,
+                row = dict(tiers=len(counts), rows=rows, tile_config=tiles,
+                    moe_block_size=block, packed_blocks=tiles_routed,
                     grid=props.multi_processor_count, timings=timings)
                 results.append(row)
                 print(json.dumps(dict(v21_fc2_pair=row)), flush=True)
