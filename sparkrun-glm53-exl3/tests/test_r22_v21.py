@@ -200,23 +200,32 @@ class Tests(unittest.TestCase):
 
     def test_cumulative_smoke_merges_overrides(self):
         source = (ROOT/'overlay/smoke_r22_v21.py').read_text(encoding='utf-8')
-        seen, checked = [], []
-        v19_outputs = {'moe/_shared/kernels/w4a16/mixed_trellis.py': 'v19'}
-        v20_outputs = {'moe/_shared/kernels/w4a16/kernel.py': 'v20k'}
-        modules = dict(b12x=NS(__file__='fake/b12x/__init__.py'),
-            patch_r22_v21=NS(patch=lambda *a, **k: None, VERSION='v21', OUTPUTS={'k': 'v21k'}),
-            patch_r22_v19=NS(patch=lambda *a, **k: checked.append(('v19', a)),
-                             OUTPUTS=v19_outputs),
-            patch_r22_v20=NS(patch=lambda *a, **k: checked.append(('v20', a)),
-                             OUTPUTS=v20_outputs),
-            smoke_r22_v18=NS(main=lambda **k: seen.append(k)))
+        seen = []
         fn = extract(source, 'main', dict(Path=Path, json=NS(dumps=lambda *a, **k: ''),
             print=lambda *a, **k: None, sys=NS(argv=[])))
-        with patch.dict(sys.modules, modules):
-            fn()
-        self.assertEqual(seen, [dict(source_overrides={**v19_outputs, **v20_outputs, 'k': 'v21k'})])
-        self.assertEqual(len(checked), 2,
-                         'v19 and v20 states must be verified directly')
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for rel, content in ((p.KERNEL, self.k_after), (p.MIXED, self.m_after)):
+                target = root/rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding='utf-8', newline='\n')
+            modules = dict(b12x=NS(__file__=str(root/'__init__.py')),
+                patch_r22_v21=p, patch_r22_v19=v19, patch_r22_v20=v20,
+                smoke_r22_v18=NS(main=lambda **k: seen.append(k)))
+            with patch.dict(sys.modules, modules):
+                fn()
+                self.assertEqual(seen, [dict(source_overrides={
+                    **v19.OUTPUTS, **v20.OUTPUTS, **p.OUTPUTS})])
+                # Final-state validation must still reject drift in either
+                # superseded file before entering the inherited chain.
+                for rel in (p.KERNEL, p.MIXED):
+                    target = root/rel
+                    original = target.read_bytes()
+                    target.write_bytes(original+b'\n# unknown edit\n')
+                    with self.assertRaisesRegex(RuntimeError, 'unexpected v21 source'):
+                        fn()
+                    target.write_bytes(original)
+                self.assertEqual(len(seen), 1)
 
     def test_recipe_preserves_baseline_and_builder(self):
         before = (ROOT/'recipes/glm53-exl3-v20-instanttensor-r1-4x.yaml').read_text(encoding='utf-8')

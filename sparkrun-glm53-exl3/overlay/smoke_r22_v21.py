@@ -152,12 +152,11 @@ def main():
     import b12x
     from patch_r22_v21 import patch, VERSION, OUTPUTS
     patch(Path(b12x.__file__).parent, check=True)
-    # v19/v20 smokes have no override hooks; verify their states directly and
-    # merge all intentional source hashes for the inherited chain.
-    from patch_r22_v19 import patch as v19_check, OUTPUTS as v19_outputs
-    v19_check(Path(b12x.__file__).parent, check=True)
-    from patch_r22_v20 import patch as v20_check, OUTPUTS as v20_outputs
-    v20_check(Path(b12x.__file__).parent, check=True)
+    # v21 replaces both files changed by v19/v20. Its exact final hashes
+    # above verify those files; predecessor patch checks would reject them.
+    # Preserve cumulative expectations, with the newest revision winning.
+    from patch_r22_v19 import OUTPUTS as v19_outputs
+    from patch_r22_v20 import OUTPUTS as v20_outputs
     from smoke_r22_v18 import main as inherited
     inherited(source_overrides={**v19_outputs, **v20_outputs, **OUTPUTS})
     result = dict(fc2_pair_overlay=VERSION)
