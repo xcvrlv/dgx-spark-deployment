@@ -186,7 +186,9 @@ SPEC_ARG=""
 [ -n "$DSPARK" ] && SPEC_ARG='--speculative-config "{\"method\":\"dspark\",\"num_speculative_tokens\":'"$DSPARK"',\"enable_adaptive_verification\":false}"'
 
 runscript() {
-  local r="$1" idx="$r" hl="" ifname="${NODE_IFNAME[$idx]}"
+  local r="$1"
+  local idx="$r"
+  local ifname="${NODE_IFNAME[$idx]}"
   [ "$r" != 0 ] && hl="--headless"
   local nccl="${NCCL_MODE//IFNAME_PLACEHOLDER/$ifname}"
   cat <<EOF
