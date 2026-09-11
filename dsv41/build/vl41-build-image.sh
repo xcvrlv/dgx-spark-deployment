@@ -26,7 +26,7 @@ SHA_HEAD=e47aa780bccf59f59dfa2cbb18e17a10b4fe69ba          # PR #56214, single c
 SHA_BASE=29af8bd672d5a780abd7399c0cc624078202e89d          # its parent
 WHEEL="vllm-0.28.1rc1.dev391+g29af8bd67-cp38-abi3-manylinux_2_28_aarch64.whl"
 HERE=$(cd "$(dirname "$0")" && pwd)
-BOXES=(spark-1 spark-2 spark-3 spark-4)
+BOXES=(192.168.0.1 192.168.0.2 192.168.0.3 192.168.0.4)
 
 mkdir -p "$WORK" && cd "$WORK"
 
@@ -46,6 +46,12 @@ while read -r f; do
   case "$f" in vllm/*.py) ;; *) continue;; esac
   mkdir -p "overlay/$(dirname "$f")"; cp "src/$f" "overlay/$f"
 done < files.txt
+
+# The engram patch also modifies files PR 56214 does not touch; fill them in
+# from src/. Never overwrite a file PR 56214 already placed.
+for f in vllm/config/engram.py vllm/models/deepseek_v4_1/common/engram.py; do
+  [ -f "overlay/$f" ] || { mkdir -p "overlay/$(dirname "$f")"; cp "src/$f" "overlay/$f"; }
+done
 
 rm -rf overlay-eng && cp -a overlay overlay-eng
 ( cd overlay-eng && git init -q . && git apply --include='vllm/*' "$HERE/../patch/engram-disk-table.patch" )

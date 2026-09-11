@@ -18,7 +18,7 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 WORK="${WORK:-$HOME/cc-scratch/vlspeed}"
-BOXES=(spark-1 spark-2 spark-3 spark-4)
+BOXES=(192.168.0.1 192.168.0.2 192.168.0.3 192.168.0.4)
 SSH_OPTS="-o StrictHostKeyChecking=no -o BatchMode=yes"
 
 VLLM_ROOT=/usr/local/lib/python3.12/dist-packages/vllm
