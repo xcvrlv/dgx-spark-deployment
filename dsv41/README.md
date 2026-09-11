@@ -15,7 +15,7 @@ files that make that work:
 | `tests/check_builder_fp4.py` | End-to-end check of the builder on a synthetic hybrid shard. |
 
 Everything else here is the upstream dsv41 stack, byte-identical to upstream
-main at commit `9d592115b721bd9ca5b353af4d86dd6a975b8628`. The three upstream
+main at commit `9d592115b721bd9ca5b353af4d86dd6a975b8628`. The upstream
 build/launch scripts are kept verbatim for diffing against upstream; the
 adaptation is an overlay, the same pattern the ds4.1 stack uses for its FP4
 disk adapter.
