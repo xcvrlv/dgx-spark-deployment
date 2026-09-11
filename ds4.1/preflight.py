@@ -34,6 +34,14 @@ def main():
             assert (tensor["dtype"],tensor["shape"]) == (dtype,shape)
             assert tensor["data_offsets"][1]+8+length <= shard.stat().st_size
     here = Path(__file__).resolve().parent
+    import os
+    launch = json.loads(os.environ.get("DS41_CONFIG_JSON", "{}"))
+    if launch.get("performance_patch"):
+        manifest = json.loads((here/"patches/performance-hashes.json").read_text())
+        base = Path(importlib.util.find_spec("b12x").origin).parent.parent
+        for relative, hashes in manifest.items():
+            digest = hashlib.sha256(((base/relative).read_text().rstrip()+"\n").encode()).hexdigest()
+            assert digest == hashes["output"], f"Performance patch mismatch: {relative}"
     hashes = json.loads((here/"patches/source-hashes.json").read_text())
     for package, relative in [("vllm","vllm/models/deepseek_v4_1/common/engram.py"),
                               ("b12x","b12x/sequence/engram/api.py"),

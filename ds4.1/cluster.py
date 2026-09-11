@@ -36,7 +36,9 @@ def environment(c, rank, iface):
         "TRITON_PTXAS_PATH":"/usr/local/cuda/bin/ptxas", "CUTE_DSL_ARCH":"sm_121a",
         "TORCH_CUDA_ARCH_LIST":"12.1a", "PYTORCH_CUDA_ALLOC_CONF":"expandable_segments:True",
         "VLLM_USE_V2_MODEL_RUNNER":"1", "VLLM_WORKER_MULTIPROC_METHOD":"spawn",
-        "VLLM_USE_BREAKABLE_CUDAGRAPH":"0",
+        "VLLM_USE_BREAKABLE_CUDAGRAPH":str(int(c.get("graph_mode") == "FULL_AND_PIECEWISE")),
+        "DS41_DISK_BLOCK_BYTES":str(c.get("disk_block_bytes",4096)),
+        "DS41_DISK_LOG_EVERY":str(c.get("disk_log_every",0)),
         "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS":"1",
         "VLLM_ENABLE_PCIE_ALLREDUCE":"0", "VLLM_ENABLE_ROCE_ALLREDUCE":"1",
         "VLLM_ROCE_ALLREDUCE_MAX_SIZE":"2MB", "VLLM_ROCE_ALLGATHER_MAX_SIZE":"16MB",
@@ -116,7 +118,10 @@ def node_action(c, action, rank):
             logs = run(["docker","logs",name],stdout=subprocess.PIPE,stderr=subprocess.STDOUT).stdout
             assert "CG Capture: mode=FULL," in logs, "No full CUDA graph capture logged"
             assert "Graph capturing finished" in logs, "No completed CUDA graph capture logged"
-            assert "CG Capture: mode=PIECEWISE," not in logs, "Unexpected piecewise graph capture"
+            if c.get("graph_mode") == "FULL_AND_PIECEWISE":
+                assert "Captured breakable cudagraph" in logs, "No completed piecewise capture"
+            else:
+                assert "CG Capture: mode=PIECEWISE," not in logs, "Unexpected piecewise graph capture"
             assert "dspark" in logs.lower(), "No DSpark evidence in logs"
             assert "[DS41_FP4_DISK] format=fp4 stored_row_bytes=128" in logs, "No FP4 disk-table load evidence"
             print(f"rank={rank}: captured graphs and FP4 disk tables recorded",flush=True)
@@ -129,12 +134,21 @@ def node_action(c, action, rank):
         assert labels["local.ds41.vllm"] == c["vllm_commit"]
         assert labels["local.ds41.b12x"] == c["b12x_commit"]
         assert labels["local.ds41.fp4-engram"] == "ds41-fp4-disk-v2"
+        if c.get("performance_patch"):
+            assert labels.get("local.ds41.performance") == "disk-sector-v1", "Build the performance image first"
         assert Path(c["model_path"]).is_dir()
         Path(c["cache_path"]).mkdir(parents=True,exist_ok=True)
         base = docker_base(c,rank,iface)
         run(base+["--rm","--entrypoint","python3",c["image"],"/opt/ds41/preflight.py"])
         run(base+["--rm","--entrypoint","python3",c["image"],"/opt/ds41/gpu_smoke.py"])
+        if c.get("performance_patch"):
+            run(base+["--rm","--entrypoint","python3",c["image"],"/opt/ds41/disk-bench.py",
+                      "--rank",str(rank),"--blocks",str(c.get("disk_block_bytes",4096)),
+                      "--tokens","1","6","--repeats","1"])
         print(f"rank={rank} iface={iface} hcas={c['hcas']} image={image['Id']}",flush=True)
+    elif action == "disk-bench":
+        base = docker_base(c,rank,iface)
+        run(base+["--rm","--entrypoint","python3",c["image"],"/opt/ds41/disk-bench.py","--rank",str(rank)])
     elif action == "start":
         # Preserve an existing service; user can explicitly stop/restart this one.
         assert subprocess.run(["docker","inspect",name],capture_output=True).returncode != 0, \
@@ -185,7 +199,7 @@ def verify_http(c):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action",choices=["plan","build","copy-image","sync","preflight","start","status","logs","stop","verify"])
+    parser.add_argument("action",choices=["plan","build","copy-image","sync","preflight","start","status","logs","stop","verify","disk-bench"])
     parser.add_argument("--config",type=Path,default=HERE/"cluster.json")
     parser.add_argument("--node",type=int,choices=range(4),help="Internal/single-node operation")
     args = parser.parse_args()
@@ -196,12 +210,12 @@ def main():
             print(shlex.join(command(c,rank)))
         return
     if args.node is not None:
-        if args.action not in ("preflight","start","status","logs","stop","verify"):
+        if args.action not in ("preflight","start","status","logs","stop","verify","disk-bench"):
             parser.error("--node is only valid for per-node operational actions")
         node_action(c,args.action,args.node)
         return
     if args.action == "build":
-        run(["bash",str(HERE/"build-image.sh")])
+        run(["bash",str(HERE/("build-performance.sh" if c.get("performance_patch") else "build-image.sh"))])
     elif args.action == "copy-image":
         expected = run(["docker","image","inspect","--format","{{.Id}}",c["image"]],capture_output=True).stdout.strip()
         for rank in range(1,4):
@@ -213,6 +227,11 @@ def main():
             assert actual == expected, "Image ID mismatch"
     elif args.action == "sync":
         sync(c,args.config)
+    elif args.action == "disk-bench":
+        assert c.get("performance_patch"), "Disk A/B requires the performance image"
+        sync(c,args.config)
+        for rank in range(4):
+            remote(c,rank,"disk-bench")
     elif args.action in ("preflight","start"):
         if args.action == "start":
             with socket.socket() as sock:

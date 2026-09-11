@@ -48,6 +48,30 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(env["VLLM_USE_BREAKABLE_CUDAGRAPH"],"0")
         self.assertFalse(any("EXL3" in key or "DCP" in key for key in env))
 
+    def test_performance_profiles_cover_c8_draft_verify_and_prefill(self):
+        for file,block in [("cluster-perf-c8.json",4096),("cluster-perf-c8-sector512.json",512)]:
+            c=json.loads((ROOT/file).read_text())
+            cmd=serve.command(c,0)
+            cc=json.loads(cmd[cmd.index("--compilation-config")+1])
+            spec=json.loads(cmd[cmd.index("--speculative-config")+1])
+            self.assertEqual(c["max_num_seqs"],8)
+            self.assertEqual(cc["cudagraph_mode"],"FULL_AND_PIECEWISE")
+            self.assertTrue(set(range(5,41,5)) <= set(cc["cudagraph_capture_sizes"]))
+            self.assertTrue(set(range(6,49,6)) <= set(cc["cudagraph_capture_sizes"]))
+            self.assertTrue({128,256,512,1024} <= set(cc["cudagraph_capture_sizes"]))
+            self.assertEqual(cc["max_cudagraph_capture_size"],1024)
+            self.assertFalse(spec["enable_adaptive_verification"])
+            self.assertEqual(cmd[cmd.index("--kv-cache-memory-bytes")+1],str(10*1024**3))
+            env=cluster.environment(c,0,"cx0")
+            self.assertEqual(env["DS41_DISK_BLOCK_BYTES"],str(block))
+            self.assertEqual(env["VLLM_USE_BREAKABLE_CUDAGRAPH"],"1")
+
+    def test_performance_profile_does_not_capture_above_scheduler_budget(self):
+        c=json.loads((ROOT/'cluster-perf-c8.json').read_text())
+        c['max_num_batched_tokens']=512
+        with self.assertRaises(ValueError):
+            serve.command(c,0)
+
     def test_fp4_encoding_matches_independent_e4m3_decoder(self):
         values = [0.,.5,1,1.5,2,3,4,6]
         for code in range(16):

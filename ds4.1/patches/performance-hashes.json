@@ -1,0 +1,10 @@
+{
+  "b12x/loader/_ple_reader.c": {
+    "input": "fa9a4b4f64d17caff2bdc54d7868e6bdaa29e666fbdfcaea074280e2ced661cd",
+    "output": "a2249e3bc36ab5f6c28ecfae493d5c48a8e067eaa2b205377ef884356c3e40d1"
+  },
+  "b12x/sequence/_shared/disk_table.py": {
+    "input": "9454806bc7d7beb4fe2ba1758730c0ed79b83d81d76724c1b15095300ba116ff",
+    "output": "b1d7231ccfe12c34588ca3a6fa98ff52a3e675208820248188e9a67d64a759ca"
+  }
+}

@@ -1,5 +1,9 @@
 # DeepSeek V4.1 Flash on the four Sparks
 
+For the c8 full/piecewise graph candidate, 10 GiB KV budget and SSD read-size
+experiment, see [PERFORMANCE.md](PERFORMANCE.md). The default `cluster.json`
+below remains the working full-decode-only launch.
+
 This directory prepares a native multi-node vLLM deployment for the existing
 MXFP4 + FP4 Engram hybrid at:
 
@@ -97,14 +101,14 @@ profiled KV capacity, SWA state and transient buffers. The context is explicit
 instead of upstream's `auto`, so insufficient memory fails visibly.
 
 The graph buckets are six verification rows per request: `6,12,...,96` for
-1–16 concurrent requests. Adaptive verification is disabled because the pinned
+1â€“16 concurrent requests. Adaptive verification is disabled because the pinned
 V2 runner unconditionally overrides FULL_DECODE_ONLY with FULL_AND_PIECEWISE
 when adaptive verification is enabled. The earlier dense 29-bucket recipe
 therefore captured both graph families despite its CLI setting. This recipe
 uses native full decode graphs, disables breakable graphs and torch.compile,
 and leaves prefill/mixed batches eager. Five-token DSpark remains enabled.
 The older GLM recipes used four rows per request and eight requests (`4,...,32`);
-copying those exact sizes would not cover this deployment's 16×6 verification.
+copying those exact sizes would not cover this deployment's 16Ã—6 verification.
 The upstream V4 Spark launcher also enables FULL_AND_PIECEWISE, so that part
 of its launch is intentionally not carried over. `fuse_allreduce_rms` is false,
 as in our GLM Spark recipes. GPU utilization remains 0.80; this correction does
