@@ -17,7 +17,6 @@ venv/
 env/
 
 # Build and test output
-build/
 dist/
 *.egg-info/
 coverage.xml
