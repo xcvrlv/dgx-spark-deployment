@@ -17,13 +17,21 @@ automatic utilization-based sizing; it does not cap total host or graph memory.
 Keep earlyoom enabled. Adaptive verification stays off to avoid its implicit
 mode override and variable-length verification graphs.
 
-Piecewise buckets include 128/256/512/1024 and all multiples of 5 and 6 needed
-for eight draft/target batches. The native full graph manager bounds decode
-captures by the request count. Starting with 1024 limits the larger prefill
-graph allocations. Once it fits, test 2048 by adding that bucket AND increasing
-max_num_batched_tokens to 2048. Treat 4096 similarly; graph capture retains
-communication buffers, so the previous eager chunk size is not automatically
-a safe capture size.
+Piecewise buckets are 128/256/512 plus all multiples of 5 and 6 needed for
+eight draft/target batches. The 1024 bucket is dropped: the capture order is
+descending (largest first, cudagraph_utils.py:476-477), each captured graph
+retains `capture` + `resources` sized by its width with strong refs that the
+next width's capture cannot reuse, and with explicit `kv_cache_memory_bytes`
+memory profiling is skipped entirely (gpu_worker.py:519-541), so nothing
+reserves the graphs' retained memory — the 19-width set accumulated past the
+pool at capture ~15-16 (width 12-15, not 1024). The published DSv4.1 recipe
+captures no big prefill buckets for the same reason. With 1024 dropped,
+`max_cudagraph_capture_size` becomes 512; prefill chunks above 512 run eager
+(the 512 bucket still matches partial chunks and small mixed batches). Once
+capture completes, the prefill bucket question re-opens with the memory
+picture from `VLLM_DEBUG_GRAPH_MEMORY_ACCOUNTING=1`, which is now set: it
+logs per-capture `[CG MEM]` pool growth and attributes active blocks to
+file:line sites.
 
 ## Earlyoom and page cache
 

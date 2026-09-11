@@ -59,8 +59,9 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(cc["cudagraph_mode"],"FULL_AND_PIECEWISE")
             self.assertTrue(set(range(5,41,5)) <= set(cc["cudagraph_capture_sizes"]))
             self.assertTrue(set(range(6,49,6)) <= set(cc["cudagraph_capture_sizes"]))
-            self.assertTrue({128,256,512,1024} <= set(cc["cudagraph_capture_sizes"]))
-            self.assertEqual(cc["max_cudagraph_capture_size"],1024)
+            self.assertTrue({128,256,512} <= set(cc["cudagraph_capture_sizes"]))
+            self.assertNotIn(1024,cc["cudagraph_capture_sizes"])
+            self.assertEqual(cc["max_cudagraph_capture_size"],512)
             self.assertFalse(spec["enable_adaptive_verification"])
             self.assertEqual(cmd[cmd.index("--kv-cache-memory-bytes")+1],str(10*1024**3))
             env=cluster.environment(c,0,"cx0")
@@ -69,7 +70,7 @@ class DeploymentTests(unittest.TestCase):
 
     def test_performance_profile_does_not_capture_above_scheduler_budget(self):
         c=json.loads((ROOT/'cluster-perf-c8.json').read_text())
-        c['max_num_batched_tokens']=512
+        c['max_num_batched_tokens']=256
         with self.assertRaises(ValueError):
             serve.command(c,0)
 

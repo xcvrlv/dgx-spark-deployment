@@ -48,8 +48,7 @@
   "prefill_graph_sizes": [
     128,
     256,
-    512,
-    1024
+    512
   ],
   "kv_cache_memory_bytes": 10737418240,
   "performance_patch": true,

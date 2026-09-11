@@ -43,6 +43,11 @@ def environment(c, rank, iface):
         # Classic NCCL/CUDA-graph scheduling mitigation from the qualified GLM
         # env; =1 is a pre-Blackwell setting that must not be used on GB10.
         "CUDA_DEVICE_MAX_CONNECTIONS":"32",
+        # Per-capture [CG MEM] pool growth + active-site file:line attribution;
+        # the capture accumulates blind when kv_cache_memory_bytes skips the
+        # profiling pass, so this is the tool that shows which capture grows
+        # the pool. Set to 0 after diagnosis.
+        "VLLM_DEBUG_GRAPH_MEMORY_ACCOUNTING":"1",
         "VLLM_USE_V2_MODEL_RUNNER":"1", "VLLM_WORKER_MULTIPROC_METHOD":"spawn",
         "VLLM_USE_BREAKABLE_CUDAGRAPH":str(int(c.get("graph_mode") == "FULL_AND_PIECEWISE")),
         "DS41_DISK_BLOCK_BYTES":str(c.get("disk_block_bytes",4096)),
