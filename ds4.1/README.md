@@ -163,6 +163,14 @@ including extreme E8M0 scales, before full-model launch.
 - Build inputs use upstream's Dockerfile and dependency pins. Container base tags
   and dependency ranges can still change; source commits and patch content are
   pinned, and `copy-image` enforces the same resulting image ID on all nodes.
+- Build base image: upstream's default build base
+  (`pytorch/manylinux2_28-builder:cuda13.0-*`) is published for linux/amd64
+  only, so an arm64 build from it dies with "exec format error" inside the
+  `base` stage. The build overrides it with
+  `pytorch/manylinuxaarch64-builder:cuda13.0-b8b5f17a7d9ccfc25bbc5cf17b3fcea12964a042`,
+  the CUDA-enabled aarch64 builder upstream CI pins for arm64 CUDA image
+  builds, and fails visibly if that tag loses its arm64 variant. Override
+  `DS41_BUILD_BASE_IMAGE` to select another builder.
 - GPU preflight checks every packed byte, signed zero, low-nibble-first order,
   real SSD reads with unaligned offsets, scales, duplicate/missing rows, all four
   TP row partitions, changing active/prepared counts and a graph consumer reading

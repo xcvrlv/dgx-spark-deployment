@@ -8,6 +8,25 @@ upstream_image=spark-vllm-ds41:upstream-a6571d0
 image=spark-vllm-ds41:mx-fp4-engram-v2
 fabric_image="${FABRIC_IMAGE:-spark-vllm-glm52-exl3:sparkring-switch-v1}"
 fabric_id="$(docker image inspect --format '{{.Id}}' "$fabric_image")"
+# Upstream's Dockerfile defaults its build base image to
+# pytorch/manylinux2_28-builder:cuda13.0-*, which is published for
+# linux/amd64 only. Building --platform linux/arm64 from it makes BuildKit
+# silently fall back to the amd64 image, and the build dies deep inside the
+# `base` stage with "exec /bin/sh: exec format error" (no amd64 emulation on
+# the aarch64 Sparks). Use the CUDA-enabled aarch64 builder that upstream CI
+# pins for arm64 CUDA image builds
+# (.buildkite/image_build/image_build_arm64.sh), and fail fast with a clear
+# message if it ever loses its arm64 variant.
+build_base_image="${DS41_BUILD_BASE_IMAGE:-pytorch/manylinuxaarch64-builder:cuda13.0-b8b5f17a7d9ccfc25bbc5cf17b3fcea12964a042}"
+build_base_manifest="$(docker manifest inspect "$build_base_image")" || {
+  echo "ERROR: cannot inspect build base image $build_base_image" >&2
+  exit 1
+}
+case "$build_base_manifest" in
+  *'"arm64"'*) ;;
+  *) echo "ERROR: build base image $build_base_image has no linux/arm64 variant" >&2
+     exit 1 ;;
+esac
 mkdir -p "$build_root"
 if [[ ! -d "$build_root/vllm/.git" ]]; then
   git init "$build_root/vllm"
@@ -19,6 +38,7 @@ test "$(git -C "$build_root/vllm" rev-parse HEAD)" = "$vllm_commit"
 test -z "$(git -C "$build_root/vllm" status --porcelain)"
 git -C "$build_root/vllm" submodule update --init --recursive --depth 1
 docker build --platform linux/arm64 --target vllm-openai \
+  --build-arg BUILD_BASE_IMAGE="$build_base_image" \
   --build-arg torch_cuda_arch_list=12.1a \
   --build-arg max_jobs="${MAX_JOBS:-8}" --build-arg nvcc_threads=1 \
   --build-arg VLLM_BUILD_COMMIT="$vllm_commit" \
