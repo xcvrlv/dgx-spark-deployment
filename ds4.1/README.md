@@ -53,6 +53,13 @@ python3 ds4.1/cluster.py verify
 python3 ds4.1/cluster.py stop
 ```
 
+For startup failures, collect complete logs **before stopping or recreating
+containers** with `python3 ds4.1/collect-logs.py`. Run this on the head Spark;
+it saves all four ranks' timestamped logs and container exit/OOM state into a
+new local `ds41-logs-*` directory over CX0. Collection continues if a peer fails.
+The ordinary `cluster.py logs` command shows only the last 150 lines, which can
+omit the original worker exception and leave only the head's cancellation trace.
+
 `start` includes preflight; running it separately first is optional. Leave the
 Sparks free for this workload. An occupied API port aborts before starting any
 DS41 rank. Existing GLM services are not stopped by this launcher. If a launch
