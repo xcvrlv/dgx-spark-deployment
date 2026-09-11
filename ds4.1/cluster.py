@@ -215,21 +215,25 @@ def install_flusher(c, rank):
         run(peer+[shlex.join(["chmod","0755",f"{home}/{FLUSHER_REMOTE_DIR}/{name}"])])
 
 
-def flusher_ctl(c, rank, ctl_action, duration=5400):
+def flusher_command(c, rank, ctl_action, duration=5400):
+    """The per-host flusher control command; the state dir is always the last
+    of the four arguments after the script, in every action's position order."""
     home = flusher_home(c)
-    remote = shlex.join([f"{home}/{FLUSHER_REMOTE_DIR}/cache-flusher-remote.sh",
-                         ctl_action, str(duration),
-                         f"{home}/{FLUSHER_REMOTE_DIR}/cache-flusher.sh",
-                         f"{home}/{FLUSHER_STATE_DIR}"])
-    return run(ssh(c,rank)+[remote],stdout=subprocess.PIPE,stderr=subprocess.STDOUT).stdout
+    return shlex.join([f"{home}/{FLUSHER_REMOTE_DIR}/cache-flusher-remote.sh",
+                       ctl_action, str(duration),
+                       f"{home}/{FLUSHER_REMOTE_DIR}/cache-flusher.sh",
+                       f"{home}/{FLUSHER_STATE_DIR}"])
+
+
+def flusher_ctl(c, rank, ctl_action, duration=5400):
+    return run(ssh(c,rank)+[flusher_command(c,rank,ctl_action,duration)],
+               stdout=subprocess.PIPE,stderr=subprocess.STDOUT).stdout
 
 
 def flusher_active(c, rank):
     """True when a live flusher is registered on that host."""
-    home = flusher_home(c)
-    remote = shlex.join([f"{home}/{FLUSHER_REMOTE_DIR}/cache-flusher-remote.sh",
-                         "status", f"{home}/{FLUSHER_STATE_DIR}"])
-    result = subprocess.run(ssh(c,rank)+[remote],capture_output=True,text=True)
+    result = subprocess.run(ssh(c,rank)+[flusher_command(c,rank,"status")],
+                            capture_output=True,text=True)
     return result.returncode == 0
 
 

@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import shlex
 import struct
 import sys
 import unittest
@@ -96,6 +97,20 @@ class DeploymentTests(unittest.TestCase):
                     decoded=-decoded
                 expected=-values[mag] if code&8 else values[mag]
                 self.assertEqual(struct.pack('f',decoded),struct.pack('f',expected))
+
+    def test_flusher_command_passes_state_dir_in_fourth_position(self):
+        # Regression: flusher_active used to pass only three arguments, shifting
+        # the state dir into the ctl script's duration slot; the duration
+        # validation then rejected it and every status check failed.
+        c = json.loads((ROOT/"cluster-perf-c8.json").read_text())
+        for rank in range(4):
+            parts = shlex.split(cluster.flusher_command(c,rank,"status"))
+            self.assertEqual(len(parts),5)
+            self.assertEqual(parts[1],"status")
+            self.assertEqual(int(parts[2]),5400)
+            self.assertTrue(parts[0].endswith("/cache-flusher-remote.sh"))
+            self.assertTrue(parts[3].endswith("/cache-flusher.sh"))
+            self.assertTrue(parts[4].endswith("/ds41-cache-flusher"))
 
     def test_invalid_topology_rejected(self):
         self.config["decode_context_parallel"] = 4
