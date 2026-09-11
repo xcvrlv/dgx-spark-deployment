@@ -15,7 +15,7 @@ BOXES=(spark-1 spark-2 spark-3 spark-4)
 SSH_OPTS="-o StrictHostKeyChecking=no -o BatchMode=yes"
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-cp "$HERE/vlspeed-topk.py" "$HERE/vlspeed-prestage.py" "$tmp/"
+cp "$HERE/../patch/vlspeed-topk.py" "$HERE/../patch/vlspeed-prestage.py" "$tmp/"
 cat > "$tmp/Dockerfile" <<'DOCK'
 FROM vlpage-eng:3
 COPY vlspeed-topk.py vlspeed-prestage.py /opt/vl41/

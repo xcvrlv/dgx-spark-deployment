@@ -48,14 +48,14 @@ while read -r f; do
 done < files.txt
 
 rm -rf overlay-eng && cp -a overlay overlay-eng
-( cd overlay-eng && git init -q . && git apply --include='vllm/*' "$HERE/engram-disk-table.patch" )
+( cd overlay-eng && git init -q . && git apply --include='vllm/*' "$HERE/../patch/engram-disk-table.patch" )
 
 # The op shim.
 rm -rf shim && mkdir -p shim/build
 cp src/csrc/libtorch_stable/fused_deepseek_v4_qnorm_rope_kv_insert_kernel.cu shim/kernel.cu
 cp src/csrc/libtorch_stable/torch_utils.h shim/
-cp "$HERE/vl41-ops-bindings.cpp" shim/bindings.cpp
-cp "$HERE/vl41-ops-build.py" shim/
+cp "$HERE/../patch/vl41-ops-bindings.cpp" shim/bindings.cpp
+cp "$HERE/../patch/vl41-ops-build.py" shim/
 docker run --rm --gpus all --ipc host -v "$WORK/shim":/shim -v "$WORK/src":/src:ro \
   -e HOME=/shim --entrypoint /bin/bash eugr/spark-vllm-b12x:latest \
   -lc 'cd /shim && python3 vl41-ops-build.py'

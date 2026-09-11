@@ -13,7 +13,7 @@ BOXES=(spark-1 spark-2 spark-3 spark-4)
 SSH_OPTS="-o StrictHostKeyChecking=no -o BatchMode=yes"
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-cp "$HERE/vlpage-page64.py" "$tmp/"
+cp "$HERE/../patch/vlpage-page64.py" "$tmp/"
 cat > "$tmp/Dockerfile" <<'DOCK'
 FROM vl41-eng:2
 COPY vlpage-page64.py /opt/vl41/vlpage-page64.py

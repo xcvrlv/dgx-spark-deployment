@@ -8,7 +8,7 @@ files that make that work:
 | Added file | What it does |
 |---|---|
 | `patch/engram-fp4-disk.py` | The FP4 adapter. Adds packed E2M1 Engram rows to the dsv41 stack's disk reader, applied on top of the installed tree. Every substitution asserts its occurrence count. See [docs/INTEGRATION.md](docs/INTEGRATION.md). |
-| `build/ds41fp4-build-image.sh` | Fourth image layer: `vlspeed-eng:5` = `vlspeed-eng:4` + the FP4 adapter. Python only, about a second per box. The three upstream build scripts reference their patch/ editors via `$HERE`, which resolves to `build/` — broken as shipped, the same cannot-stat this layer hit. Run them with the patch files as siblings, or copy them into `build/` first. |
+| `build/ds41fp4-build-image.sh` | Fourth image layer: `vlspeed-eng:5` = `vlspeed-eng:4` + the FP4 adapter. Python only, about a second per box. The three upstream build scripts referenced their patch/ editors via `$HERE`, which resolves to `build/` — broken as shipped (the stale md5 entries are exactly these three scripts). Fixed here to `$HERE/../patch/`; upstream files otherwise verbatim. |
 | `launch/ds41-flash-vlspeed-up.sh` | The wrapper. Reads `../ds4.1/cluster.json` (the fleet's node config) and launches the dsv41 stack on it. |
 | `tests/test_engram_disk_fp4.py` | CPU contract test for the fp4 read path. 14 checks, all passing. |
 | `tests/build_real_engram_table_fp4.py` | Builds one rank's real fp4 row file from the hybrid, with a bitwise `--verify`. |
