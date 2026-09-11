@@ -188,6 +188,7 @@ SPEC_ARG=""
 runscript() {
   local r="$1"
   local idx="$r"
+  local hl=""
   local ifname="${NODE_IFNAME[$idx]}"
   [ "$r" != 0 ] && hl="--headless"
   local nccl="${NCCL_MODE//IFNAME_PLACEHOLDER/$ifname}"
