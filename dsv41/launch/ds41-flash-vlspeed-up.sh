@@ -94,7 +94,7 @@ DISK_ODIRECT="${DISK_ODIRECT:-true}"
 # EXTRA='--enable-auto-tool-choice --tool-call-parser deepseek_v4
 # --reasoning-parser deepseek_v4' (confirm the reasoning registry with
 # vllm serve --help first).
-EXTRA="${EXTRA:}"
+EXTRA="${EXTRA:-}"
 MOE_BACKEND="${MOE_BACKEND:-b12x}"  # b12x; empty = DeepGEMM
 # The docker memory cap is not free at 1M (upstream finding 3). Same rule as
 # the upstream launcher: cleared above CTX 262144 unless the caller set it.
