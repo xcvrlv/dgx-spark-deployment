@@ -30,9 +30,19 @@ patch exists to remove, and it raises there.
 
 Applies to an installed vLLM tree; pass the dist-packages/vllm path.
 """
+import os
 import sys
 
 ROOT = sys.argv[1] if len(sys.argv) > 1 else "/usr/local/lib/python3.12/dist-packages/vllm"
+
+
+def sub_opt(path, old, new):
+    """Like sub(), but skips with a loud warning when the target file is absent."""
+    p = f"{ROOT}/{path}"
+    if not os.path.exists(p):
+        print(f"  {path}: SKIPPED (file not present in this tree)")
+        return
+    sub(path, old, new)
 
 
 def sub(path, old, new):
@@ -211,7 +221,7 @@ print(f"  {ENGRAM}: appended EngramDiskStager")
 # 4. Wiring, from tonyd2wild patch/cudagraph-prestage/model_state-prestage.diff.
 STATE = "models/deepseek_v4_1/nvidia/model_state.py"
 
-sub(STATE,
+sub_opt(STATE,
     """from vllm.config import VllmConfig
 from vllm.triton_utils import tl, triton
 """,
@@ -224,7 +234,7 @@ from vllm.models.deepseek_v4_1.common.engram import (
 from vllm.triton_utils import tl, triton
 """)
 
-sub(STATE,
+sub_opt(STATE,
     """                (self.max_num_reqs, depth), -1, dtype=torch.int32, device=device
             )
 
@@ -247,7 +257,7 @@ sub(STATE,
     def prepare_inputs(
 """)
 
-sub(STATE,
+sub_opt(STATE,
     """        model_inputs["lookback_token_ids"] = window
         return model_inputs
 """,

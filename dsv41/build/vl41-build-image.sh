@@ -56,8 +56,11 @@ done
 rm -rf overlay-eng && cp -a overlay overlay-eng
 ( cd overlay-eng && git init -q . && git apply --include='vllm/*' "$HERE/../patch/engram-disk-table.patch" )
 
-# The op shim.
-rm -rf shim && mkdir -p shim/build
+# The op shim. The container's CUDA JIT writes ~/.nv as root into the mounted
+# shim dir, so an interrupted run leaves root-owned leftovers a plain rm
+# cannot remove.
+rm -rf shim 2>/dev/null || sudo rm -rf shim
+mkdir -p shim/build
 cp src/csrc/libtorch_stable/fused_deepseek_v4_qnorm_rope_kv_insert_kernel.cu shim/kernel.cu
 cp src/csrc/libtorch_stable/torch_utils.h shim/
 cp "$HERE/../patch/vl41-ops-bindings.cpp" shim/bindings.cpp

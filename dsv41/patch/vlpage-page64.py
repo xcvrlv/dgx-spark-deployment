@@ -15,10 +15,24 @@ specs take 64*compress_ratio and land in separate KV-cache groups.
 
 Applies to an installed vLLM tree; pass the dist-packages/vllm path.
 """
+import os
 import re
 import sys
 
 ROOT = sys.argv[1] if len(sys.argv) > 1 else "/usr/local/lib/python3.12/dist-packages/vllm"
+
+
+def sub_opt(path, old, new, count=1):
+    """Like sub(), but skips with a loud warning when the target is absent.
+
+    The wheel-installed tree does not carry models/deepseek_v4_1/nvidia/ —
+    the FlashInfer backend is not in this build, so its page-64 fix is moot.
+    """
+    p = f"{ROOT}/{path}"
+    if not os.path.exists(p):
+        print(f"  {path}: SKIPPED (file not present in this tree)")
+        return
+    sub(path, old, new, count)
 
 
 def sub(path, old, new, count=1):
@@ -56,7 +70,7 @@ sub("models/deepseek_v4_1/attention.py",
 
 # 4/5. Both backends must accept either group's manager block size, or
 #      select_common_block_size rejects the ratio-1 group.
-sub("models/deepseek_v4_1/nvidia/flashinfer_sparse.py",
+sub_opt("models/deepseek_v4_1/nvidia/flashinfer_sparse.py",
     "    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:\n        return [128]\n",
     "    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:\n"
     "        # vl41-page64: 64 for compress_ratio 1, 128 for compress_ratio 2.\n"
