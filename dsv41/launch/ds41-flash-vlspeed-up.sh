@@ -54,7 +54,7 @@ c = json.load(open(sys.argv[1]))
 if len(c["nodes"]) != 4:
     raise SystemExit(">>> FAIL: the wrapper requires the four-node config")
 lines = [
-    "IMAGE_MODEL=" + shlex.quote(c["model_path"]),
+    "MODEL_PATH=" + shlex.quote(c["model_path"]),
     "SERVED=" + shlex.quote(c.get("served_model_name", "DeepSeek-V4.1-Flash")),
     "PORT=" + shlex.quote(str(c["port"])),
     "MASTER_PORT=" + shlex.quote(str(c["master_port"])),
