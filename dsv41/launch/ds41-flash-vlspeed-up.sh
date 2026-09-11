@@ -88,7 +88,13 @@ VERIFY="${VERIFY:-0}"               # N = verify the first N engram lookups, eag
 PRESTAGE="${PRESTAGE:-1}"           # 0 = disable the prestage, for an A/B
 DISK_THREADS="${DISK_THREADS:-12}"
 DISK_ODIRECT="${DISK_ODIRECT:-true}"
-EXTRA="${EXTRA:---enable-auto-tool-choice --tool-call-parser deepseek_v41 --reasoning-parser deepseek_v41}"
+# The tree (0.28.1rc1.dev391) registers no deepseek_v41 tool or reasoning
+# parser -- the closest are deepseek_v4 and older. The upstream launcher omits
+# both and serves plain prompts only, so that is the default here. Opt in with
+# EXTRA='--enable-auto-tool-choice --tool-call-parser deepseek_v4
+# --reasoning-parser deepseek_v4' (confirm the reasoning registry with
+# vllm serve --help first).
+EXTRA="${EXTRA:}"
 MOE_BACKEND="${MOE_BACKEND:-b12x}"  # b12x; empty = DeepGEMM
 # The docker memory cap is not free at 1M (upstream finding 3). Same rule as
 # the upstream launcher: cleared above CTX 262144 unless the caller set it.
