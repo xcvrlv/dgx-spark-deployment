@@ -35,6 +35,14 @@ def environment(c, rank, iface):
         "CUDA_VISIBLE_DEVICES":"0", "CUDA_HOME":"/usr/local/cuda",
         "TRITON_PTXAS_PATH":"/usr/local/cuda/bin/ptxas", "CUTE_DSL_ARCH":"sm_121a",
         "TORCH_CUDA_ARCH_LIST":"12.1a", "PYTORCH_CUDA_ALLOC_CONF":"expandable_segments:True",
+        # Bound runtime JIT compilation (DeepGEMM/FlashInfer shapes captured at
+        # runtime): the published 4x Spark DSv4.1 recipe exhausted host memory
+        # on all four nodes from unbounded parallel compile jobs, and its fix
+        # is prebuilt kernels plus MAX_JOBS=2.
+        "MAX_JOBS":"2", "FLASHINFER_NVCC_THREADS":"1",
+        # Classic NCCL/CUDA-graph scheduling mitigation from the qualified GLM
+        # env; =1 is a pre-Blackwell setting that must not be used on GB10.
+        "CUDA_DEVICE_MAX_CONNECTIONS":"32",
         "VLLM_USE_V2_MODEL_RUNNER":"1", "VLLM_WORKER_MULTIPROC_METHOD":"spawn",
         "VLLM_USE_BREAKABLE_CUDAGRAPH":str(int(c.get("graph_mode") == "FULL_AND_PIECEWISE")),
         "DS41_DISK_BLOCK_BYTES":str(c.get("disk_block_bytes",4096)),
@@ -184,6 +192,86 @@ def sync(c, config_path):
              f"{peer[-1]}:{c['deploy_dir']}/cluster.json"])
 
 
+FLUSHER_REMOTE_DIR = ".local/libexec/ds41-cache-flusher"
+FLUSHER_STATE_DIR = ".cache/ds41-cache-flusher"
+
+
+def flusher_home(c):
+    # All DS41 cluster paths are absolute and identical on peers; the flusher
+    # state lives under the SSH account's home.
+    user = c.get("ssh_user")
+    assert user, "cache_flusher requires ssh_user in the cluster config"
+    return f"/home/{user}"
+
+
+def install_flusher(c, rank):
+    peer = ssh(c, rank)
+    home = flusher_home(c)
+    run(peer+[shlex.join(["mkdir","-p",f"{home}/{FLUSHER_REMOTE_DIR}",
+                          f"{home}/{FLUSHER_STATE_DIR}"])])
+    for name in ("cache-flusher.sh","cache-flusher-remote.sh"):
+        run(["rsync","-a","--protect-args","-e",shlex.join(peer[:-1]),
+             str(HERE/name), f"{peer[-1]}:{home}/{FLUSHER_REMOTE_DIR}/{name}"])
+        run(peer+[shlex.join(["chmod","0755",f"{home}/{FLUSHER_REMOTE_DIR}/{name}"])])
+
+
+def flusher_ctl(c, rank, ctl_action, duration=5400):
+    home = flusher_home(c)
+    remote = shlex.join([f"{home}/{FLUSHER_REMOTE_DIR}/cache-flusher-remote.sh",
+                         ctl_action, str(duration),
+                         f"{home}/{FLUSHER_REMOTE_DIR}/cache-flusher.sh",
+                         f"{home}/{FLUSHER_STATE_DIR}"])
+    return run(ssh(c,rank)+[remote],stdout=subprocess.PIPE,stderr=subprocess.STDOUT).stdout
+
+
+def flusher_active(c, rank):
+    """True when a live flusher is registered on that host."""
+    home = flusher_home(c)
+    remote = shlex.join([f"{home}/{FLUSHER_REMOTE_DIR}/cache-flusher-remote.sh",
+                         "status", f"{home}/{FLUSHER_STATE_DIR}"])
+    result = subprocess.run(ssh(c,rank)+[remote],capture_output=True,text=True)
+    return result.returncode == 0
+
+
+def flush_cache(c):
+    """Install and start the bounded page-cache flusher on every host.
+
+    Fail closed: all four nodes must report a live flusher before containers
+    are created, and a failure on one node stops the nodes already started.
+    """
+    started = []
+    try:
+        for rank in range(4):
+            host = c["nodes"][rank]["host"]
+            print(f"[{host}] installing page-cache flusher",flush=True)
+            install_flusher(c,rank)
+            print(f"[{host}] starting page-cache flusher",flush=True)
+            print(flusher_ctl(c,rank,"start",str(c.get("cache_flusher_seconds",5400))).strip(),flush=True)
+            started.append(rank)
+        for rank in range(4):
+            assert flusher_active(c,rank), \
+                f"Flusher inactive on {c['nodes'][rank]['host']}"
+    except Exception:
+        for rank in started:
+            try:
+                flusher_ctl(c,rank,"stop")
+            except Exception:
+                pass
+        raise
+    print("Page-cache flushers active on all four hosts",flush=True)
+
+
+def flusher_stop(c):
+    """Stop the flushers once serving is healthy (no drops during serving)."""
+    for rank in range(4):
+        host = c["nodes"][rank]["host"]
+        try:
+            flusher_ctl(c,rank,"stop")
+        except Exception:
+            print(f"WARNING: flusher on {host} did not stop; kill it before "
+                  f"serving (window self-expires in 90 min)",flush=True)
+
+
 def verify_http(c):
     url = f"http://127.0.0.1:{c['port']}/v1/chat/completions"
     # Two requests exercise replay after warmup. No full 1M-token allocation test.
@@ -199,7 +287,7 @@ def verify_http(c):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action",choices=["plan","build","copy-image","sync","preflight","start","status","logs","stop","verify","disk-bench"])
+    parser.add_argument("action",choices=["plan","build","copy-image","sync","preflight","start","status","logs","stop","verify","disk-bench","flush-cache"])
     parser.add_argument("--config",type=Path,default=HERE/"cluster.json")
     parser.add_argument("--node",type=int,choices=range(4),help="Internal/single-node operation")
     args = parser.parse_args()
@@ -208,6 +296,9 @@ def main():
         for rank in range(4):
             print(f"rank={rank} CX0={c['nodes'][rank]['cx0']} HCA={c['hcas']}")
             print(shlex.join(command(c,rank)))
+        return
+    if args.action == "flush-cache":
+        flush_cache(c)
         return
     if args.node is not None:
         if args.action not in ("preflight","start","status","logs","stop","verify","disk-bench"):
@@ -251,6 +342,11 @@ def main():
         assert len(model_digests) == len(image_ids) == 1, "Models or image IDs differ across hosts"
         if args.action == "start":
             # Start workers before the head, as in the earlier GLM fleet launcher.
+            if c.get("cache_flusher"):
+                # Lazy safetensors loading repopulates page cache over the whole
+                # load window; on GB10 that collapse is what let earlyoom kill
+                # the worker during piecewise capture. Fail closed without it.
+                flush_cache(c)
             for rank in (3,2,1,0):
                 remote(c,rank,"start")
             deadline = time.monotonic()+c["ready_timeout_seconds"]
@@ -267,6 +363,9 @@ def main():
                 time.sleep(20)
             else:
                 raise TimeoutError("Readiness timed out; containers retained for logs")
+            if c.get("cache_flusher"):
+                # Health is ready only after capture; stop before serving.
+                flusher_stop(c)
             verify_http(c)
             for rank in range(4):
                 remote(c,rank,"verify")

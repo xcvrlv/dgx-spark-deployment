@@ -176,7 +176,7 @@ including extreme E8M0 scales, before full-model launch.
 | GLM DCP gathers, CKV borrowing/in-place updates | Not applicable to initial DCP1; the CED/global-KV ownership also differs. |
 | GLM MTP argmax and feedback changes | Not transplanted into DSpark's Markov/confidence-head path. |
 | GLM instanttensor loader overlay | Not used. Lazy safetensors plus file-source descriptors is the inspected SSD Engram path. |
-| Repeated host page-cache flusher | Not enabled. Assess startup memory first; do not impose the old GLM load-window flusher on an SSD-backed workload by default. |
+| Repeated host page-cache flusher | Now ported (`cache-flusher.sh` + `cluster.py flush-cache`): the GLM earlyoom kill during piecewise capture matches this failure mode, the measured 101.49→112.9 GiB reclamation swing is on these hosts, and the Engram reader is O_DIRECT so the flusher cannot touch its data. Enabled for the perf profiles via `cache_flusher: true`; the working c16 `cluster.json` is unchanged. |
 
 ## Provenance and validation limits
 

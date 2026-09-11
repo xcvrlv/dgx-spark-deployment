@@ -25,6 +25,67 @@ max_num_batched_tokens to 2048. Treat 4096 similarly; graph capture retains
 communication buffers, so the previous eager chunk size is not automatically
 a safe capture size.
 
+## Earlyoom and page cache
+
+The September 11 piecewise crash (worker died at capture 12/19, exit code
+None) matches the documented GLM-5.3 failure on these hosts: available memory
+fell during `FULL_AND_PIECEWISE` capture and earlyoom sent SIGTERM to the
+highest-oom-score worker. SparkRun's earlyoom configuration prefers
+`vllm|python` processes, so the worker dies the moment MemAvailable collapses.
+Lazy safetensors loading brings the ~81 GiB of per-rank weight files into page
+cache page by page over the whole load window, and capture plus retained
+communication buffers consume more on top; NVIDIA forum reports confirm
+page-cache saturation on DGX Spark requires reclamation before every
+large-model run.
+
+The GLM-5.3 fix is ported. `cache-flusher.sh` runs on each host (not in the
+container): `sync` plus `echo 3 | sudo -n tee /proc/sys/vm/drop_caches` every
+60 s for a bounded 90-minute window, single-instance via flock, matching the
+SparkRun scoped clear-cache sudo rule. `cluster.py start` installs and starts
+the flushers on all four nodes and refuses to launch without live flushers
+(fail closed), then stops them once health is ready — health is ready only
+after capture, so the window covers the whole load and capture phase.
+`cluster.py flush-cache` runs them stand-alone. The DS41 Engram reader uses
+O_DIRECT, so the flusher cannot interfere with the SSD path's data; only
+file-backed pages are dropped. The qualified GLM measurement on these hosts
+was 101.49 GiB free before reclamation and ~112.9 GiB after.
+
+If earlyoom still intervenes with the flusher active, retain its message, the
+flusher log and the last startup log; the host-policy fallback is raising the
+swap threshold (`EARLYOOM_ARGS` `-s 80` → `-s 20` in `/etc/default/earlyoom`)
+or excluding the serving processes, then restarting earlyoom. Keep earlyoom
+enabled.
+
+## Runtime JIT wedge
+
+The published 4x Spark DSv4.1 recipe exhausted host memory on all four nodes
+from a FlashInfer GEMM compiled at runtime with 22 parallel jobs, and its fix
+is prebuilt kernels plus MAX_JOBS=2. The image ships `flashinfer-jit-cache`
+precompiled, but DeepGEMM/CuteDSL shapes can still compile at capture time.
+The env now bounds runtime JIT parallelism with `MAX_JOBS=2` and
+`FLASHINFER_NVCC_THREADS=1`, and carries `CUDA_DEVICE_MAX_CONNECTIONS=32`
+from the qualified GLM env — the classic NCCL/CUDA-graph scheduling
+mitigation. =1 is a pre-Blackwell setting that must not be used on GB10.
+
+## P2P and fabric
+
+`VLLM_ENABLE_PCIE_ALLREDUCE=0` is env-asserted and NVLS is off (0 nvls
+channels logged). The `P2P Chunksize`, `isAllDirectP2p` and `p2p channels`
+lines in the NCCL log are NCCL's intra-node P2P tuning output — moot with one
+GPU per host — and the ring/tree connections go via NET/IB over the two RoCE
+HCAs as intended. Neither the qualified GLM env nor the published DSv4.1
+recipe sets `NCCL_P2P_DISABLE`, so none is added here.
+
+## Published reference
+
+[tonyd2wild's DSv4.1 recipe](https://github.com/tonyd2wild/DeepSeek-V4.1-Flash-vLLM-DGX-Spark)
+(4x DGX Spark TP4, DSpark k=5, FULL_AND_PIECEWISE, Engram-on-disk) reports
+one-stream decode 73.8 tok/s, six streams 131.9 aggregate and prefill
+902-1539 tok/s cold. That confirms the eager 496/30 baseline is not the
+hardware's ceiling; their documented four-node host-memory crash fix was
+prebuilt kernels plus MAX_JOBS=2, ported above. Their one-stream number is a
+comparison point, not a result for our native B12x backend.
+
 ## Build and run on the head
 
 Copy the updated ds4.1 directory to the head. This is a small overlay of the
@@ -41,6 +102,11 @@ python3 ds4.1/cluster.py disk-bench --config ds4.1/cluster-perf-c8.json > ds41-d
 
 python3 ds4.1/cluster.py start --config ds4.1/cluster-perf-c8.json
 ```
+
+`start` now brings up the page-cache flushers on all four hosts first and
+refuses to launch without them; it stops them once health is ready. A failed
+launch leaves them running for the bounded window; `flush-cache` restarts
+them to refresh the full window on the next attempt.
 
 The real-checkpoint benchmark tests both tables on every host at
 1/6/48/512/4096 token-equivalent batches, at both read sizes. It applies TP row
@@ -73,6 +139,29 @@ c1/c2/c4/c8/c16 = 30/45/58/79.8/105.6 tok/s. Targets, not predictions: prefill
 about 1500/1350 tok/s and decode c1 >=45, c8 >=119.7 tok/s.
 
 ## SSD changes and interpretation
+
+User-supplied disk benchmark (September 11): all 75 pasted records passed byte
+checks. Rank 0's layer-1 4096-byte records were omitted from the paste. For the
+three complete ranks, the median of each rank's summed two-layer median wall
+times is:
+
+| Token-equivalent batch | 4096-byte reads | 512-byte reads |
+|---|---:|---:|
+| 1 | 0.495 ms | 0.335 ms |
+| 6 (c1 target verification) | 1.021 ms | 0.763 ms |
+| 48 (c8 target verification) | 4.808 ms | 3.386 ms |
+| 512 | 34.044 ms | 31.713 ms |
+| 4096 | 221.006 ms | 238.839 ms |
+
+These are sums of separate medians, not measured joint end-to-end percentiles.
+Smaller reads help the decode-size gathers but lose about 8% at 4096 despite
+roughly seven times fewer bytes. At 4096 they issue about 48K reads per table
+versus 44K, consistent with less coalescing and a request-rate/processing limit.
+1024 was not measured, so its winner is unknown. Keep both profiles for A/B.
+At the previous 4096-chunk setting, ~0.22 seconds for both tables compares with
+~8.3 seconds to prefill 4096 tokens at 496 tok/s. Standalone SSD time is thus
+only roughly 3% of that budget; it cannot by itself explain a 3x prefill gap.
+Live DS41_DISK timing and GPU traces remain necessary to locate in-serve stalls.
 
 The existing native reader uses O_DIRECT: the OS page cache does not satisfy
 its table reads. It coalesces repeated/adjacent blocks within each batch but

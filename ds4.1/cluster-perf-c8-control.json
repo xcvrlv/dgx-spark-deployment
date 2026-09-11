@@ -54,5 +54,7 @@
   "kv_cache_memory_bytes": 10737418240,
   "performance_patch": true,
   "disk_block_bytes": 4096,
-  "disk_log_every": 64
+  "disk_log_every": 64,
+  "cache_flusher": true,
+  "cache_flusher_seconds": 5400
 }
