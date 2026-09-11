@@ -26,7 +26,7 @@ DISK_PY=$VLLM_ROOT/models/deepseek_v4_1/common/engram_disk.py
 ENGRAM_PY=$VLLM_ROOT/models/deepseek_v4_1/common/engram.py
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-cp "$HERE/engram-fp4-disk.py" "$tmp/"
+cp "$HERE/../patch/engram-fp4-disk.py" "$tmp/"
 cat > "$tmp/Dockerfile" <<DOCK
 FROM vlspeed-eng:4
 COPY engram-fp4-disk.py /opt/vl41/
