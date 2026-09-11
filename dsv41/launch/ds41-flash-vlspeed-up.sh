@@ -215,7 +215,6 @@ docker run -d --name $NAME --network host --ipc host --shm-size 32g --gpus all \
       --tensor-parallel-size $TP \\
       --gpu-memory-utilization $GPU_UTIL \\
       --max-model-len $CTX --max-num-seqs $MAXSEQS --max-num-batched-tokens $MAXBATCH \\
-      --engram-config "{\\"table_path\\":\\"/table\\",\\"disk_read_threads\\":$DISK_THREADS,\\"disk_direct_io\\":$DISK_ODIRECT}" \\
       $SPEC_ARG \\
       --tokenizer-mode deepseek_v41 \\
       $EAGER_ARG $GRAPH_ARG $MOE_ARG --enable-chunked-prefill \\
