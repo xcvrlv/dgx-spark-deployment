@@ -27,15 +27,17 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(cmd[cmd.index("--max-model-len")+1],"1048576")
             self.assertEqual(cmd[cmd.index("--max-num-seqs")+1],"16")
 
-    def test_graph_capacity_covers_dspark_batch_and_all_short_depths(self):
+    def test_graph_capacity_covers_fixed_dspark_decode_only(self):
         cmd = serve.command(self.config,0)
         cfg = json.loads(cmd[cmd.index("--compilation-config")+1])
         spec = json.loads(cmd[cmd.index("--speculative-config")+1])
         self.assertEqual(cfg["cudagraph_mode"],"FULL_DECODE_ONLY")
-        self.assertTrue(set(range(1,7)) <= set(cfg["cudagraph_capture_sizes"]))
+        self.assertEqual(cfg["cudagraph_capture_sizes"],list(range(6,97,6)))
+        self.assertEqual(cfg["mode"],0)
+        self.assertFalse(cfg["pass_config"]["fuse_allreduce_rms"])
         self.assertEqual(max(cfg["cudagraph_capture_sizes"]),16*(spec["num_speculative_tokens"]+1))
         self.assertEqual(spec["method"],"dspark")
-        self.assertTrue(spec["enable_adaptive_verification"])
+        self.assertFalse(spec["enable_adaptive_verification"])
 
     def test_fabric_uses_dual_rail_roce_not_pcie(self):
         env = cluster.environment(self.config,2,"test-cx0")
@@ -43,7 +45,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(env["NCCL_IB_HCA"],"rocep1s0f0,roceP2p1s0f0")
         self.assertEqual(env["VLLM_HOST_IP"],"192.168.0.3")
         self.assertEqual(env["VLLM_ENABLE_PCIE_ALLREDUCE"],"0")
-        self.assertEqual(env["VLLM_USE_BREAKABLE_CUDAGRAPH"],"1")
+        self.assertEqual(env["VLLM_USE_BREAKABLE_CUDAGRAPH"],"0")
         self.assertFalse(any("EXL3" in key or "DCP" in key for key in env))
 
     def test_fp4_encoding_matches_independent_e4m3_decoder(self):

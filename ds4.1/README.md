@@ -8,7 +8,7 @@ MXFP4 + FP4 Engram hybrid at:
 ```
 
 It uses **TP4 with expert sharding, DCP1, five-token DSpark, 16 sequences,
-1,048,576-token maximum context, and breakable decode CUDA graphs**. Engram
+1,048,576-token maximum context, and full decode CUDA graphs**. Engram
 tables stay on each host's SSD; only requested rows are staged. The model is
 mounted read-only. Nothing downloads or rewrites checkpoint weights.
 
@@ -85,9 +85,9 @@ An alternative settings file can be selected with `--config FILE`.
 | Small TP collectives | Current B12x RoCEnante, 2 MB all-reduce / 16 MB all-gather bounds |
 | NCCL channels | Four, cross-NIC on, merged NICs off, subnet-aware routing on |
 | PCIe all-reduce | Disabled for the four separate hosts |
-| DSpark | Five drafts, TP4, greedy drafts, standard rejection, adaptive verification |
+| DSpark | Five fixed drafts, TP4, greedy drafts, standard rejection; adaptive verification disabled |
 | Attention | `B12X_MLA_SPARSE_DSV41`; native V4.1 cache layout, no generic NVFP4 KV override |
-| Graphs | `VLLM_USE_BREAKABLE_CUDAGRAPH=1`, `FULL_DECODE_ONLY`, capacity through 96 token rows |
+| Graphs | `VLLM_USE_BREAKABLE_CUDAGRAPH=0`, compile mode 0, `FULL_DECODE_ONLY`, 16 buckets `6,12,...,96` |
 | Prefill | Chunked, 4096-token scheduler budget; prefix caching enabled |
 | Allocation budget | 0.80 initially, with automatic KV sizing after profiling |
 
@@ -96,12 +96,26 @@ requests fit simultaneously. Actual concurrency at that length depends on the
 profiled KV capacity, SWA state and transient buffers. The context is explicit
 instead of upstream's `auto`, so insufficient memory fails visibly.
 
-The graph buckets preserve depths 1â€“6 and the Spark launch's step-4 grid through
-96 (=16Ã—6). These are **breakable CUDA graphs**, not torch.compile: the branch
-sets compilation mode to NONE while retaining graph capture/replay. Disk I/O
-and row preparation happen before graph replay; the graph consumes stable BF16
-rows. Prefill/mixed batches may remain eager in FULL_DECODE_ONLY mode. Debug
-logging is intentional for initial qualification so actual captures can be verified.
+The graph buckets are six verification rows per request: `6,12,...,96` for
+1–16 concurrent requests. Adaptive verification is disabled because the pinned
+V2 runner unconditionally overrides FULL_DECODE_ONLY with FULL_AND_PIECEWISE
+when adaptive verification is enabled. The earlier dense 29-bucket recipe
+therefore captured both graph families despite its CLI setting. This recipe
+uses native full decode graphs, disables breakable graphs and torch.compile,
+and leaves prefill/mixed batches eager. Five-token DSpark remains enabled.
+The older GLM recipes used four rows per request and eight requests (`4,...,32`);
+copying those exact sizes would not cover this deployment's 16×6 verification.
+The upstream V4 Spark launcher also enables FULL_AND_PIECEWISE, so that part
+of its launch is intentionally not carried over. `fuse_allreduce_rms` is false,
+as in our GLM Spark recipes. GPU utilization remains 0.80; this correction does
+not lower the KV budget or the requested context length.
+
+To apply this launch-only correction, update `serve.py` and `cluster.py` on the
+head Spark, then run `python3 ds4.1/cluster.py stop` followed by
+`python3 ds4.1/cluster.py start`. Start synchronizes the files over CX0; they are
+mounted into the existing v2 image, so no image rebuild or weight download is
+needed. Verification rejects any piecewise capture and requires full capture
+and completion logs. Runtime memory improvement still needs cluster validation.
 
 SSD io_uring syscalls are blocked by Docker's default seccomp profile. This
 candidate uses `seccomp=unconfined` and `IPC_LOCK` for the disk reader; it does
@@ -186,7 +200,7 @@ including extreme E8M0 scales, before full-model launch.
   validates the two table headers without reading large tensor payloads.
   Full shard hashes were checked by the download/distribution script.
 - Post-start checks require healthy containers without OOM/restarts, actual
-  breakable capture logs, FP4 disk-table registration and two HTTP generations.
+  full capture/completion logs without piecewise capture, FP4 disk-table registration and two HTTP generations.
   They do not establish sustained concurrency-16, 1M-context capacity, DSpark
   acceptance rate or numerical parity against upstream FP8 Engrams.
 

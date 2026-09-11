@@ -10,17 +10,18 @@ def command(config, rank):
         raise ValueError("This initial deployment requires four nodes and DCP1")
     if config["num_speculative_tokens"] != 5:
         raise ValueError("Use the checkpoint's qualified five-token DSpark setup")
-    # Adaptive verification needs all short depths; match the Spark launch's
-    # denser step-4 buckets beyond depth=6, with max capacity 16*(5+1)=96.
+    # Fixed five-token DSpark: six verification rows per request. Adaptive
+    # verification overrides FULL_DECODE_ONLY to FULL_AND_PIECEWISE upstream.
     capacity = config["max_num_seqs"] * 6
-    sizes = sorted(set(list(range(1, 7)) + list(range(6, capacity + 1, 4)) + [capacity]))
+    sizes = list(range(6, capacity + 1, 6))
     spec = {"method": "dspark", "num_speculative_tokens": 5,
             "draft_tensor_parallel_size": 4,
             "attention_backend": "B12X_MLA_SPARSE_DSV41",
             "draft_sample_method": "greedy", "rejection_sample_method": "standard",
-            "enable_adaptive_verification": True}
-    compile_config = {"cudagraph_mode": "FULL_DECODE_ONLY",
-                      "cudagraph_capture_sizes": sizes, "custom_ops": ["all"]}
+            "enable_adaptive_verification": False}
+    compile_config = {"mode": 0, "cudagraph_mode": "FULL_DECODE_ONLY",
+                      "cudagraph_capture_sizes": sizes, "custom_ops": ["all"],
+                      "pass_config": {"fuse_allreduce_rms": False}}
     result = ["python3", "-m", "vllm.entrypoints.cli.main", "serve", "/model",
               "--served-model-name", config["served_model_name"], "--host", "0.0.0.0",
               "--port", str(config["port"]), "--dtype", "bfloat16",
@@ -57,5 +58,5 @@ if __name__ == "__main__":
         config = json.load(stream)
     config = json.loads(os.environ.get("DS41_CONFIG_JSON", json.dumps(config)))
     cmd = command(config, args.rank)
-    print("DS41: TP4/EP4, DCP1, SSD FP4 Engram, DSpark5, breakable decode CUDA graphs", flush=True)
+    print("DS41: TP4/EP4, DCP1, SSD FP4 Engram, fixed DSpark5, FULL_DECODE_ONLY CUDA graphs", flush=True)
     os.execvp(cmd[0], cmd)

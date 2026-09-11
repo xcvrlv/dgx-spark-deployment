@@ -36,7 +36,7 @@ def environment(c, rank, iface):
         "TRITON_PTXAS_PATH":"/usr/local/cuda/bin/ptxas", "CUTE_DSL_ARCH":"sm_121a",
         "TORCH_CUDA_ARCH_LIST":"12.1a", "PYTORCH_CUDA_ALLOC_CONF":"expandable_segments:True",
         "VLLM_USE_V2_MODEL_RUNNER":"1", "VLLM_WORKER_MULTIPROC_METHOD":"spawn",
-        "VLLM_USE_BREAKABLE_CUDAGRAPH":"1",
+        "VLLM_USE_BREAKABLE_CUDAGRAPH":"0",
         "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS":"1",
         "VLLM_ENABLE_PCIE_ALLREDUCE":"0", "VLLM_ENABLE_ROCE_ALLREDUCE":"1",
         "VLLM_ROCE_ALLREDUCE_MAX_SIZE":"2MB", "VLLM_ROCE_ALLGATHER_MAX_SIZE":"16MB",
@@ -114,7 +114,9 @@ def node_action(c, action, rank):
         print(f"rank={rank} running image={info['Image']}",flush=True)
         if action == "verify":
             logs = run(["docker","logs",name],stdout=subprocess.PIPE,stderr=subprocess.STDOUT).stdout
-            assert "Captured breakable cudagraph" in logs, "No actual breakable graph capture logged"
+            assert "CG Capture: mode=FULL," in logs, "No full CUDA graph capture logged"
+            assert "Graph capturing finished" in logs, "No completed CUDA graph capture logged"
+            assert "CG Capture: mode=PIECEWISE," not in logs, "Unexpected piecewise graph capture"
             assert "dspark" in logs.lower(), "No DSpark evidence in logs"
             assert "[DS41_FP4_DISK] format=fp4 stored_row_bytes=128" in logs, "No FP4 disk-table load evidence"
             print(f"rank={rank}: captured graphs and FP4 disk tables recorded",flush=True)
