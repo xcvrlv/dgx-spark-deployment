@@ -1,0 +1,23 @@
+DeepSeek-V4.1-Flash on 3x NVIDIA DGX Spark
+Copyright (C) 2026 zurih
+
+This repository (start.sh, stop.sh, boot.py changes, adapter/, scripts/, files/,
+runtime glue, documentation) is free software: you can redistribute it and/or
+modify it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version. See LICENSE. It is distributed WITHOUT ANY WARRANTY;
+see the License for details.
+
+Third-party components and their licences:
+
+- The recipe skeleton (boot.py, benchmarks/, tests/, the Engram row-store idea and
+  the Docker layout) originates from 0xSero/deepseek-v4.1-flash-4x-rtx-pro-6000,
+  MIT License, Copyright (c) 2026 0xSero. The MIT notice is retained in
+  LICENSE.upstream-MIT as that licence requires; the combined work is offered
+  under the AGPL-3.0-or-later.
+- runtime/flash_mla_sm120.py is derived from SGLang and remains under the Apache
+  License 2.0 (LICENSE.sglang); the page-split changes are distributed under the
+  same terms.
+- SGLang, FlashInfer, DeepGEMM, PyTorch, NVIDIA components and the DeepSeek model
+  retain their respective upstream licences. This repository does not
+  redistribute model weights.

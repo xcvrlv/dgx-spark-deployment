@@ -1,0 +1,4 @@
+.env.fleet
+upstream/state*/
+upstream/logs*/
+!upstream/.env.tp4.example

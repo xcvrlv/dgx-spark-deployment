@@ -1,5 +1,9 @@
 # DGX Spark deployment
 
+The MiaAI-based DeepSeek V4.1 SGLang TP4 setup with FP8 Engram on local SSD
+and separate forced-2048/default-512 serving scripts is in
+[`ds41-sglang/`](ds41-sglang/README.md).
+
 This repository is the development and test workspace for deploying vLLM on
 DGX Spark systems. It is organized around three related activities:
 
