@@ -8,6 +8,8 @@ import struct
 import sys
 import tempfile
 import unittest
+import runpy
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,11 +21,42 @@ model_check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(model_check)
 
 
+class ImageCheckTests(unittest.TestCase):
+    def test_build_check_does_not_import_driver_dependent_vllm(self):
+        proxy = ModuleType('b12x.comm.roce._proxy')
+        proxy.load = lambda: SimpleNamespace(_name='proxy.so')
+        storage = ModuleType('b12x.loader._native')
+        storage._build = lambda: 'storage.so'
+        modules = {proxy.__name__: proxy, storage.__name__: storage}
+        import builtins
+        original_import = builtins.__import__
+
+        def guarded_import(name, *args, **kwargs):
+            if name == 'vllm' or name.startswith('vllm.'):
+                raise ImportError('libcuda.so.1 unavailable during docker build')
+            return original_import(name, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as d:
+            package = Path(d)
+            (package / '_C_stable_libtorch.abi3.so').touch()
+            wheel = SimpleNamespace(locate_file=lambda _: package)
+            with patch.dict(sys.modules, modules), \
+                 patch.object(sys, 'argv', ['image-check.py']), \
+                 patch('platform.machine', return_value='aarch64'), \
+                 patch('importlib.metadata.distribution', return_value=wheel), \
+                 patch('importlib.metadata.version', return_value='4.6.2'), \
+                 patch('subprocess.run'), \
+                 patch('builtins.__import__', side_effect=guarded_import):
+                runpy.run_path(str(ROOT / 'image-check.py'), run_name='__main__')
+
+
 class FleetTests(unittest.TestCase):
     def setUp(self):
         self.c = fleet.load_config(ROOT / 'cluster-c8.json')
 
     def test_four_distinct_ranks_and_native_context(self):
+        # Exercise the native cap independently of the operator's saved profile.
+        self.c['max_model_len'] = 1048576
         for rank in range(4):
             args = fleet.serve_args(self.c, rank)
             self.assertEqual(args[args.index('--node-rank') + 1], str(rank))

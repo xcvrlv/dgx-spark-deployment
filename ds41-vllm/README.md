@@ -92,8 +92,10 @@ too.** Larger/ineligible collectives use NCCL over IB/RoCE.
 Current b12x already contains dual-rail striping, size-aware gather behavior,
 and the SM121 integrated-memory transport. Current JJ exchanges its RoCEnante
 setup through Gloo, avoiding an extra Torch NCCL communicator in serving.
-The image compiles and loads the C verbs proxy and io_uring storage extension
-during build. The four-node test constructs the actual vLLM RoCEnante adapter,
+The image compiles and loads the C verbs proxy and compiles the io_uring storage
+extension during build. CUDA extension imports, storage loading and the vLLM
+adapter ABI check run after build with `docker run --gpus all`; Docker build
+does not have the host's `libcuda.so.1`. The four-node test constructs the actual vLLM RoCEnante adapter,
 rejects initialization fallback, compares reductions/gathers with NCCL,
 checks traffic counters on both rails, and checks mixed CUDA-graph replay with
 changing inputs. A passing import or health endpoint alone is not qualification.
