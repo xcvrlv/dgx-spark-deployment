@@ -1,0 +1,23 @@
+{
+  "image": "spark-vllm-ds41:jj-35601be-b12x-323107f-sm121",
+  "model_path": "/home/juho/.cache/huggingface/hub/models--deepseek-ai--DeepSeek-V4.1-Flash",
+  "revision": "fb2764a5cf321eaa5070ca8f9e892818f477c16d",
+  "cache_path": "/var/tmp/ds41-jj-cache",
+  "ssh_user": "juho",
+  "nodes": [
+    {"host": "10.3.10.1", "ip": "192.168.0.1"},
+    {"host": "10.3.10.2", "ip": "192.168.0.2"},
+    {"host": "10.3.10.3", "ip": "192.168.0.3"},
+    {"host": "10.3.10.4", "ip": "192.168.0.4"}
+  ],
+  "hcas": ["rocep1s0f0", "roceP2p1s0f0"],
+  "gid_index": 3,
+  "port": 8000,
+  "master_port": 29511,
+  "max_model_len": 1048576,
+  "max_num_seqs": 8,
+  "max_num_batched_tokens": 4096,
+  "gpu_memory_utilization": 0.80,
+  "draft_tokens": 0,
+  "startup_timeout": 3600
+}

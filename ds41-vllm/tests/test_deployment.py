@@ -1,0 +1,120 @@
+import copy
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+import shlex
+import struct
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+import fleet
+
+spec = importlib.util.spec_from_file_location('model_check', ROOT / 'model-check.py')
+model_check = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(model_check)
+
+
+class FleetTests(unittest.TestCase):
+    def setUp(self):
+        self.c = fleet.load_config(ROOT / 'cluster-c8.json')
+
+    def test_four_distinct_ranks_and_native_context(self):
+        for rank in range(4):
+            args = fleet.serve_args(self.c, rank)
+            self.assertEqual(args[args.index('--node-rank') + 1], str(rank))
+            self.assertEqual('--headless' in args, rank != 0)
+            self.assertEqual(args[args.index('--max-model-len') + 1], '1048576')
+            self.assertEqual(args[args.index('--decode-context-parallel-size') + 1], '1')
+            self.assertNotIn('--disable-custom-all-reduce', args)
+            self.assertNotIn('--hf-overrides', args)
+            self.assertNotIn('--speculative-config', args)
+
+    def test_draft_capture_covers_every_c8_depth(self):
+        self.c['draft_tokens'] = 3
+        args = fleet.serve_args(self.c, 0)
+        config = json.loads(args[args.index('--compilation-config') + 1])
+        self.assertEqual(config['cudagraph_capture_sizes'], list(range(1, 33)))
+        draft = json.loads(args[args.index('--speculative-config') + 1])
+        self.assertEqual(draft['draft_tensor_parallel_size'], 4)
+
+    def test_shell_roundtrip_keeps_paths_and_json_literal(self):
+        self.c['model_path'] = '/srv/model with spaces/$(touch SHOULD_NOT_EXIST)'
+        cmd = fleet.docker(self.c, 1, 'probe') + fleet.serve_args(self.c, 1)
+        self.assertEqual(shlex.split(shlex.join(cmd)), cmd)
+        mount = next(x for x in cmd if x.startswith('type=bind,src=/srv/model'))
+        self.assertIn('$(touch SHOULD_NOT_EXIST)', mount)
+
+    def test_fabric_uses_per_rank_address_and_exact_hcas(self):
+        a, b = fleet.environment(self.c, 0), fleet.environment(self.c, 1)
+        self.assertNotEqual(a['VLLM_HOST_IP'], b['VLLM_HOST_IP'])
+        self.assertEqual(a['NCCL_IB_HCA'], '=rocep1s0f0,roceP2p1s0f0')
+        self.assertEqual(a['B12X_ROCE_HCA'], 'rocep1s0f0,roceP2p1s0f0')
+        self.assertEqual(a['VLLM_ENABLE_ROCE_ALLREDUCE'], '1')
+        self.assertEqual(a['VLLM_ENABLE_PCIE_ALLREDUCE'], '0')
+
+    def test_duplicate_node_rejected(self):
+        self.c['nodes'][1] = copy.deepcopy(self.c['nodes'][0])
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / 'bad.json'
+            p.write_text(json.dumps(self.c))
+            with self.assertRaises(AssertionError):
+                fleet.load_config(p)
+
+    def test_remote_failure_is_not_a_success(self):
+        result = type('Result', (), {'returncode': 1, 'stdout': '', 'stderr': 'RDMA failed'})()
+        with patch.object(fleet.subprocess, 'run', return_value=result):
+            with self.assertRaisesRegex(RuntimeError, 'RDMA failed'):
+                fleet.remote(self.c, 2, 'false')
+
+
+class ModelTests(unittest.TestCase):
+    def checkpoint(self, root, dtype='F8_E4M3', width=256):
+        config = {'quantization_config': {'expert_dtype': 'fp4'},
+                  'text_config': {'engram_layer_ids': [1]}}
+        raw = json.dumps(config).encode()
+        (root / 'config.json').write_bytes(raw)
+        name = 'layers.1.engram.embed.weight'
+        header = json.dumps({name: {'dtype': dtype, 'shape': [1, width],
+                                    'data_offsets': [0, width]}}).encode()
+        (root / 'model-1.safetensors').write_bytes(struct.pack('<Q', len(header)) + header + bytes(width))
+        (root / 'model.safetensors.index.json').write_text(json.dumps({'weight_map': {name: 'model-1.safetensors'}}))
+        return hashlib.sha256(raw).hexdigest()
+
+    def test_original_fp8_header_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            digest = self.checkpoint(root)
+            with patch.object(model_check, 'CONFIG_SHA256', digest):
+                model_check.validate(root)
+
+    def test_fp4_hybrid_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            digest = self.checkpoint(root, 'U8', 128)
+            with patch.object(model_check, 'CONFIG_SHA256', digest), self.assertRaises(AssertionError):
+                model_check.validate(root)
+
+    def test_truncated_shard_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            digest = self.checkpoint(root)
+            shard = root / 'model-1.safetensors'
+            shard.write_bytes(shard.read_bytes()[:-1])
+            with patch.object(model_check, 'CONFIG_SHA256', digest), self.assertRaisesRegex(AssertionError, 'Truncated'):
+                model_check.validate(root)
+
+    def test_modified_config_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.checkpoint(root)
+            with self.assertRaisesRegex(AssertionError, 'original config'):
+                model_check.validate(root)
+
+
+if __name__ == '__main__':
+    unittest.main()

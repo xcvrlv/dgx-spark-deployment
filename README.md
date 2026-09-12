@@ -1,5 +1,9 @@
 # DGX Spark deployment
 
+Current DeepSeek V4.1 Flash target: [JJ + b12x ARM64/SM121 TP4 c8](ds41-vllm/README.md),
+with the native 1M context cap, original MXFP4/FP8-Engram checkpoint and RoCEnante.
+Build and launch scripts are provided; fleet GPU qualification is pending.
+
 The MiaAI-based DeepSeek V4.1 SGLang TP4 setup with FP8 Engram on local SSD
 and separate forced-2048/default-512 serving scripts is in
 [`ds41-sglang/`](ds41-sglang/README.md).
