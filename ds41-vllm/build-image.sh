@@ -14,8 +14,13 @@ fi
 base="spark-vllm-ds41:jj-$VLLM_COMMIT-base"
 # Use JJ's complete build/dependency pipeline, including Rust and CUDA extensions.
 # The nightly path resolves one Torch/vision/audio set and shares it across stages.
+# --platform alone cannot turn the upstream AMD64-only builder into ARM64.
+docker pull --platform linux/arm64 "$BUILD_BASE_IMAGE"
+[[ $(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$BUILD_BASE_IMAGE") == linux/arm64 ]] \
+  || { echo 'Builder image must be linux/arm64.' >&2; exit 1; }
 docker build --platform linux/arm64 --target vllm-openai \
   --file "$src/docker/Dockerfile" \
+  --build-arg BUILD_BASE_IMAGE="$BUILD_BASE_IMAGE" \
   --build-arg PYTORCH_NIGHTLY=1 \
   --build-arg torch_cuda_arch_list=12.1a \
   --build-arg max_jobs="${MAX_JOBS:-4}" --build-arg nvcc_threads=1 \

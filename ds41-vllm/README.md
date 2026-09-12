@@ -158,6 +158,14 @@ resulting image for exact reproduction. `.build/image-inspect.json` and
 `.build/pip-freeze.txt` record the result; fleet distribution verifies identical
 image IDs. Rebuilding later can resolve different dependencies.
 
+The compile-stage builder is pinned separately in `versions.env` to the ARM64
+`pytorch/manylinuxaarch64-builder` image. JJ's default
+`pytorch/manylinux2_28-builder` tag is AMD64-only and fails on Spark with
+`exec /bin/sh: exec format error`, even with `--platform linux/arm64`.
+The launcher explicitly passes `BUILD_BASE_IMAGE` and checks its platform.
+After updating `build-image.sh` and `versions.env`, rerun `bash build-image.sh`;
+there is no need to prune caches or edit the pinned source checkout.
+
 The Windows development host has no running Docker daemon or accessible Spark
 GPU. **The image has not been compiled here, and native-context c8 serving,
 RoCEnante throughput and model quality remain unmeasured.** Run the supplied
