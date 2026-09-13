@@ -75,6 +75,24 @@ class FleetTests(unittest.TestCase):
         draft = json.loads(args[args.index('--speculative-config') + 1])
         self.assertEqual(draft['draft_tensor_parallel_size'], 4)
 
+    def test_flat_checkpoint_used_by_serving_and_preflight(self):
+        self.c['model_path'] = '/srv/DeepSeek-V4.1-Flash-MXFP4-FP4-Engram'
+        self.c['model_subpath'] = '.'
+        self.assertEqual(fleet.serve_args(self.c, 0)[2], '/checkpoint')
+        with patch.object(fleet, 'remote', return_value='sha256:same') as remote:
+            fleet.preflight(self.c)
+        for call in remote.call_args_list:
+            script = call.args[2]
+            self.assertIn(self.c['model_path'] + '/config.json', script)
+            self.assertIn('/opt/ds41/model-check.py /checkpoint\n', script)
+            self.assertNotIn('/snapshots/', script)
+
+    def test_checkpoint_subpath_cannot_escape_mount(self):
+        for subpath in ('../outside', '/outside'):
+            self.c['model_subpath'] = subpath
+            with self.assertRaises(AssertionError):
+                fleet.checkpoint_path(self.c, '/checkpoint')
+
     def test_shell_roundtrip_keeps_paths_and_json_literal(self):
         self.c['model_path'] = '/srv/model with spaces/$(touch SHOULD_NOT_EXIST)'
         cmd = fleet.docker(self.c, 1, 'probe') + fleet.serve_args(self.c, 1)
@@ -103,6 +121,16 @@ class FleetTests(unittest.TestCase):
         with patch.object(fleet.subprocess, 'run', return_value=result):
             with self.assertRaisesRegex(RuntimeError, 'RDMA failed'):
                 fleet.remote(self.c, 2, 'false')
+
+    def test_silent_remote_failure_reports_host_and_status(self):
+        result = SimpleNamespace(returncode=1, stdout='', stderr='')
+        with patch.object(fleet.subprocess, 'run', return_value=result) as run:
+            with self.assertRaisesRegex(RuntimeError, r'rank 0 .*exit 1'):
+                fleet.remote(self.c, 0, 'test -r /missing/config.json')
+        script = run.call_args.kwargs['input']
+        self.assertIn('set -Eeuo pipefail', script)
+        self.assertIn('$BASH_COMMAND', script)
+        self.assertIn(' ERR\n', script)
 
 
 class ModelTests(unittest.TestCase):

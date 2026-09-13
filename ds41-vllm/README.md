@@ -67,6 +67,13 @@ work. The checker verifies the original config hash, all indexed tensors and
 shard sizes, and the Engram FP8 datatype/256-byte row width. It rejects the old
 FP4-Engram hybrid. This is a header/completeness check, not a full weight checksum.
 
+For a flat directory containing `config.json` and the shards directly, set
+`model_path` to that directory and `model_subpath` to `"."` in the fleet JSON.
+Without `model_subpath`, the launcher uses `snapshots/<revision>` as before.
+Directory names do not determine precision: an old `FP4-Engram` directory name
+can be retained if its contents are now the original FP8-Engram checkpoint.
+This launcher-only change does not require rebuilding the image.
+
 JJ now binds Engram directly to immutable checkpoint file offsets and b12x
 reads selected rows through io_uring. No conversion or separate row-file pack
 step is needed. The older dsv41/SGLang row files are incompatible with this path.

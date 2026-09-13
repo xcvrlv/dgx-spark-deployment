@@ -3,7 +3,7 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shlex
 import subprocess
 import time
@@ -26,7 +26,15 @@ def load_config(path):
     assert c['draft_tokens'] in (0, 1, 3, 5, 7)
     for key in ('model_path', 'cache_path'):
         assert c[key].startswith('/') and c[key] != '/' and ',' not in c[key]
+    checkpoint_path(c, '/checkpoint')
     return c
+
+
+def checkpoint_path(c, root):
+    # Keep the whole HF cache mounted for blob symlinks; '.' selects a flat model.
+    relative = PurePosixPath(c.get('model_subpath', f"snapshots/{c['revision']}"))
+    assert not relative.is_absolute() and '..' not in relative.parts, 'model_subpath must stay inside model_path'
+    return str(PurePosixPath(root) / relative)
 
 
 def ssh(c, rank):
@@ -37,10 +45,14 @@ def ssh(c, rank):
 
 
 def remote(c, rank, script, timeout=120):
-    proc = subprocess.run(ssh(c, rank) + ['bash', '-s'], input='set -euo pipefail\n' + script,
+    prologue = '''set -Eeuo pipefail
+trap 'rc=$?; printf "FAILED (exit %s) at remote line %s: %s\\n" "$rc" "$LINENO" "$BASH_COMMAND" >&2' ERR
+'''
+    proc = subprocess.run(ssh(c, rank) + ['bash', '-s'], input=prologue + script,
                           text=True, capture_output=True, timeout=timeout)
     if proc.returncode:
-        raise RuntimeError(f'rank {rank}: {proc.stdout}\n{proc.stderr}')
+        raise RuntimeError(f"rank {rank} ({c['nodes'][rank]['host']}), exit {proc.returncode}:\n"
+                           f"{proc.stdout}\n{proc.stderr}")
     return proc.stdout.strip()
 
 
@@ -91,7 +103,7 @@ export NCCL_SOCKET_IFNAME="=$iface" GLOO_SOCKET_IFNAME="$iface"
 
 
 def serve_args(c, rank):
-    cmd = ['vllm', 'serve', f"/checkpoint/snapshots/{c['revision']}",
+    cmd = ['vllm', 'serve', checkpoint_path(c, '/checkpoint'),
            '--served-model-name', MODEL, '--host', '0.0.0.0', '--port', str(c['port']),
            '--distributed-executor-backend', 'mp', '--nnodes', '4', '--node-rank', str(rank),
            '--master-addr', c['nodes'][0]['ip'], '--master-port', str(c['master_port']),
@@ -132,7 +144,7 @@ def preflight(c):
     for rank in range(4):
         script = setup(c, rank) + 'test "$(uname -m)" = aarch64\n'
         script += shlex.join(['mkdir', '-p', c['cache_path']]) + '\n'
-        script += shlex.join(['test', '-r', f"{c['model_path']}/snapshots/{c['revision']}/config.json"]) + '\n'
+        script += shlex.join(['test', '-r', checkpoint_path(c, c['model_path']) + '/config.json']) + '\n'
         script += shlex.join(['docker', 'image', 'inspect', '--format', '{{.Os}}/{{.Architecture}}', c['image']]) + " | grep -qx linux/arm64\n"
         script += f"fstype=$(findmnt -n -o FSTYPE -T {shlex.quote(c['model_path'])})\n"
         script += 'case "$fstype" in ext4|xfs|btrfs) ;; *) echo "Model must be local SSD storage, got $fstype"; exit 1;; esac\n'
@@ -151,7 +163,7 @@ assert roce.is_supported(), 'RoCEnante unsupported'
 '''
         script += shlex.join(docker(c, rank) + ['python3', '-c', check]) + '\n'
         script += shlex.join(docker(c, rank) + ['python3', '/opt/ds41/image-check.py', '--gpu']) + '\n'
-        script += shlex.join(docker(c, rank) + ['python3', '/opt/ds41/model-check.py', f"/checkpoint/snapshots/{c['revision']}"]) + '\n'
+        script += shlex.join(docker(c, rank) + ['python3', '/opt/ds41/model-check.py', checkpoint_path(c, '/checkpoint')]) + '\n'
         script += shlex.join(['docker', 'image', 'inspect', '--format', '{{.Id}}', c['image']]) + '\n'
         result = remote(c, rank, script, timeout=600)
         print(f'rank {rank}: {result}', flush=True)
