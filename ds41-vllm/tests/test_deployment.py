@@ -90,6 +90,23 @@ class FleetTests(unittest.TestCase):
         draft = json.loads(args[args.index('--speculative-config') + 1])
         self.assertEqual(draft['draft_tensor_parallel_size'], 4)
 
+    def test_c16_limits_capture_and_communication_switches(self):
+        c = fleet.load_config(ROOT / 'cluster-c16.json')
+        args = fleet.serve_args(c, 0)
+        self.assertEqual(args[args.index('--max-num-seqs') + 1], '16')
+        self.assertEqual(args[args.index('--max-model-len') + 1], '393216')
+        self.assertEqual(args[args.index('--gpu-memory-utilization') + 1], '0.88')
+        compilation = json.loads(args[args.index('--compilation-config') + 1])
+        self.assertEqual(compilation['cudagraph_capture_sizes'], list(range(1, 17)))
+        c['draft_tokens'] = 3
+        args = fleet.serve_args(c, 0)
+        compilation = json.loads(args[args.index('--compilation-config') + 1])
+        self.assertEqual(compilation['cudagraph_capture_sizes'], list(range(1, 65)))
+        self.assertTrue(all(fleet.environment(c, 0)[key] == '1' for key in fleet.ROCE_OPTIONS.values()))
+        c['roce_optimizations']['inline_payload'] = False
+        self.assertEqual(fleet.environment(c, 0)['B12X_ROCE_INLINE_PAYLOAD'], '0')
+        self.assertEqual(fleet.environment(c, 0)['B12X_ROCE_SKIP_EMPTY_CQ'], '1')
+
     def test_flat_checkpoint_used_by_serving_and_preflight(self):
         self.c['model_path'] = '/srv/DeepSeek-V4.1-Flash-MXFP4-FP4-Engram'
         self.c['model_subpath'] = '.'

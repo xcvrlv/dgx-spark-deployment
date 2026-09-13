@@ -21,12 +21,22 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/local-inferenc
     && test "$(git -C /opt/b12x rev-parse HEAD)" = "${B12X_COMMIT}" \
     && python3 -c 'import torch; print("torch==" + torch.__version__)' > /tmp/torch-constraint.txt \
     && python3 -m pip install --no-cache-dir -c /tmp/torch-constraint.txt /opt/b12x pytest
+COPY patches/ /opt/ds41/patches/
+# Apply only the audited communication port to source and installed wheel.
+RUN python3 /opt/ds41/patches/roce.py /opt/b12x/b12x \
+    && package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \
+    && python3 /opt/ds41/patches/roce.py "$package" \
+    && python3 /opt/ds41/patches/roce.py "$package" --check \
+    && cc -O2 -std=gnu11 -I"$package/comm/roce" /opt/ds41/patches/probe_roce.c \
+       -libverbs -lpthread -o /opt/ds41/patches/probe_roce \
+    && /opt/ds41/patches/probe_roce
 COPY image-check.py model-check.py roce-check.py /opt/ds41/
 RUN python3 /opt/ds41/image-check.py \
     && python3 -m pip freeze > /opt/ds41/pip-freeze.txt
 LABEL org.opencontainers.image.title="DeepSeek V4.1 Flash JJ TP4 ARM64 SM121" \
       org.opencontainers.image.revision="${VLLM_COMMIT}" \
       local-inference.b12x.commit="${B12X_COMMIT}"
+LABEL local-inference.roce-overlay="ds41-roce-v1"
 WORKDIR /opt/ds41
 ENTRYPOINT []
 CMD ["vllm", "--help"]

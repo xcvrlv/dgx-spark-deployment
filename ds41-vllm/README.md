@@ -1,4 +1,10 @@
-# DeepSeek V4.1 Flash — JJ + b12x, four Sparks, c8
+# DeepSeek V4.1 Flash — JJ + b12x, four Sparks
+
+**Current candidate: c16, 384K context, GPU utilization 0.88, new upstream pins
+and four audited RoCEnante ports.** See [OPTIMIZATIONS.md](OPTIMIZATIONS.md) for
+the build/migration commands, rollback switches and prefill A/B profiles.
+`fleet.py` defaults to `cluster-c16.json`; explicit older configs still work.
+The following sections retain the original c8 bring-up instructions as reference.
 
 Native ARM64 source build of local-inference-lab vLLM `dev/jovian-judgement`,
 with b12x, SM121 kernels and dual-rail RoCEnante. Independent of the preserved

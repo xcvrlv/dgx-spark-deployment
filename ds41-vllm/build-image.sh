@@ -4,6 +4,7 @@ here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/versions.env"
 [[ $(uname -m) == aarch64 ]] || { echo 'Build natively on a Spark (ARM64).' >&2; exit 1; }
 mkdir -p "$here/.build"
+python3 "$here/check-upstream.py" --output "$here/.build/upstream-check.json"
 src="$here/.build/vllm-$VLLM_COMMIT"
 if [[ ! -d "$src/.git" ]]; then
   git clone --filter=blob:none --no-checkout https://github.com/local-inference-lab/vllm.git "$src"

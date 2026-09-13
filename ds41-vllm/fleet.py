@@ -12,6 +12,12 @@ import urllib.request
 HERE = Path(__file__).resolve().parent
 NAME = 'ds41-jj'
 MODEL = 'DeepSeek-V4.1-Flash'
+ROCE_OPTIONS = {
+    'inline_payload': 'B12X_ROCE_INLINE_PAYLOAD',
+    'balanced_fanout': 'B12X_ROCE_BALANCED_FANOUT',
+    'skip_empty_cq': 'B12X_ROCE_SKIP_EMPTY_CQ',
+    'lazy_payload_init': 'B12X_ROCE_LAZY_PAYLOAD_INIT',
+}
 
 
 def load_config(path):
@@ -20,7 +26,9 @@ def load_config(path):
     assert len({n['host'] for n in c['nodes']}) == 4
     assert len({n['ip'] for n in c['nodes']}) == 4
     assert len(c['hcas']) == 2
-    assert c['max_num_seqs'] == 8, 'This is the c8 recipe'
+    assert c['max_num_seqs'] in (8, 16), 'Supported profiles: c8 and c16'
+    assert set(c.get('roce_optimizations', {})) <= set(ROCE_OPTIONS)
+    assert all(type(v) is bool for v in c.get('roce_optimizations', {}).values())
     assert 0 < c['gpu_memory_utilization'] < 1
     assert 0 < c['max_model_len'] <= 1048576
     assert c['draft_tokens'] in (0, 1, 3, 5, 7)
@@ -58,6 +66,8 @@ trap 'rc=$?; printf "FAILED (exit %s) at remote line %s: %s\\n" "$rc" "$LINENO" 
 
 def environment(c, rank):
     return {
+        **{env: str(int(c.get('roce_optimizations', {}).get(key, False)))
+           for key, env in ROCE_OPTIONS.items()},
         'VLLM_HOST_IP': c['nodes'][rank]['ip'],
         'VLLM_WORKER_MULTIPROC_METHOD': 'spawn', 'VLLM_USE_V2_MODEL_RUNNER': '1',
         'VLLM_ENABLE_ROCE_ALLREDUCE': '1', 'VLLM_ENABLE_PCIE_ALLREDUCE': '0',
@@ -113,7 +123,7 @@ def serve_args(c, rank):
            '--block-size', '256', '--kv-cache-dtype', 'fp8',
            '--engram-config', json.dumps({'cpu_offload': False, 'table_memory': 'disk'}),
            '--gpu-memory-utilization', str(c['gpu_memory_utilization']),
-           '--max-model-len', str(c['max_model_len']), '--max-num-seqs', '8',
+           '--max-model-len', str(c['max_model_len']), '--max-num-seqs', str(c['max_num_seqs']),
            '--max-num-batched-tokens', str(c['max_num_batched_tokens']),
            '--enable-prefix-caching', '--enable-chunked-prefill', '--async-scheduling',
            '--no-scheduler-reserve-full-isl',
@@ -121,7 +131,7 @@ def serve_args(c, rank):
            '--tool-call-parser', 'deepseek_v41', '--enable-auto-tool-choice']
     depth = c['draft_tokens'] + 1
     compilation = {'cudagraph_mode': 'FULL_AND_PIECEWISE', 'custom_ops': ['all'],
-                   'cudagraph_capture_sizes': list(range(1, 8 * depth + 1)),
+                   'cudagraph_capture_sizes': list(range(1, c['max_num_seqs'] * depth + 1)),
                    'pass_config': {'fuse_allreduce_rms': False}}
     cmd += ['--compilation-config', json.dumps(compilation)]
     if c['draft_tokens']:
@@ -146,6 +156,9 @@ def preflight(c):
         script += shlex.join(['mkdir', '-p', c['cache_path']]) + '\n'
         script += shlex.join(['test', '-r', checkpoint_path(c, c['model_path']) + '/config.json']) + '\n'
         script += shlex.join(['docker', 'image', 'inspect', '--format', '{{.Os}}/{{.Architecture}}', c['image']]) + " | grep -qx linux/arm64\n"
+        if any(c.get('roce_optimizations', {}).values()):
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.roce-overlay"}}', c['image']]) + " | grep -qx ds41-roce-v1\n"
         script += f"fstype=$(findmnt -n -o FSTYPE -T {shlex.quote(c['model_path'])})\n"
         script += 'case "$fstype" in ext4|xfs|btrfs) ;; *) echo "Model must be local SSD storage, got $fstype"; exit 1;; esac\n'
         for hca in c['hcas']:
@@ -216,9 +229,10 @@ def smoke(c):
         assert probs and all(p is not None and math.isfinite(p) for p in probs), result
         return result['usage']['completion_tokens']
     start = time.monotonic()
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        counts = list(pool.map(generate, range(8)))
-    print(json.dumps({'concurrency': 8, 'completion_tokens': sum(counts),
+    concurrency = c['max_num_seqs']
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        counts = list(pool.map(generate, range(concurrency)))
+    print(json.dumps({'concurrency': concurrency, 'completion_tokens': sum(counts),
                       'wall_seconds': time.monotonic() - start}))
     chat = request(c, '/v1/chat/completions', {
         'model': MODEL, 'messages': [{'role': 'user', 'content': 'Name the four inner planets.'}],
@@ -232,12 +246,12 @@ def smoke(c):
     output = remote(c, 0, shlex.join(['docker', 'logs', f'{NAME}-0']) + ' 2>&1')
     assert 'Using RoCEnante (b12x one-shot RoCE collectives)' in output, 'RoCEnante initialization unconfirmed'
     assert 'RoCEnante all-reduce is live' in output, 'No confirmed RoCEnante dispatch'
-    print('c8 smoke and live RoCEnante dispatch passed; inspect generated output for quality.')
+    print(f'c{concurrency} smoke and live RoCEnante dispatch passed; inspect generated output for quality.')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', default=str(HERE / 'cluster-c8.json'))
+    parser.add_argument('--config', default=str(HERE / 'cluster-c16.json'))
     parser.add_argument('action', choices=['plan', 'share', 'preflight', 'fabric', 'start', 'smoke', 'status', 'logs', 'stop'])
     parser.add_argument('--rank', type=int, choices=range(4), default=0)
     args = parser.parse_args()
