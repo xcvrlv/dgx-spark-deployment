@@ -66,3 +66,27 @@ python3 fleet.py --config .build/cluster-c16-latest.json start
 
 No GPU image build or four-Spark run was performed from this Windows workspace.
 Use the generated config consistently; this launch runs fabric and serving checks.
+
+## Optional adaptive draft-depth launch
+
+Upstream heads rechecked 2026-09-13 17:11 UTC: unchanged (JJ 9342b1a,
+b12x fd3c638). This uses existing upstream configuration; no image patch.
+After copying updated fleet.py and configure-c16.py to the Spark:
+
+```bash
+python3 configure-c16.py --from-config .build/cluster-c16-latest.json --output .build/cluster-c16-adaptive.json --draft-tokens 7 --adaptive-window 32 --adaptive-initial 7
+python3 fleet.py --config .build/cluster-c16-adaptive.json plan
+python3 fleet.py --config .build/cluster-c16-adaptive.json stop
+python3 fleet.py --config .build/cluster-c16-adaptive.json start
+```
+
+32 observations is an experimental starting window, not a measured optimum.
+The upstream acceptance controller tracks batch-size-dependent observations;
+this is not a promise of a global adjustment every 32 server iterations.
+Maximum depth remains seven; graph sizes stay 1..128, not the current adapted
+depth. Confidence-based adaptive verification remains enabled separately.
+This reduces draft work when the controller selects a shorter depth; it does
+not remove the maximum-depth allocation or solve the earlier startup failure.
+For rollback, restart using the preserved cluster-c16-latest.json. Generating
+without --adaptive-window explicitly clears inherited adaptation settings.
+No image rebuild is required for the pinned image; no GPU A/B performed here.

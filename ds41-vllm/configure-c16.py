@@ -13,13 +13,30 @@ if __name__ == '__main__':
     parser.add_argument('--prefill8192', action='store_true', help='experimental larger prefill batches')
     parser.add_argument('--draft-tokens', type=int, choices=(0, 1, 3, 5, 7), default=7,
                         help='DSpark depth; current recipe defaults to 7, use 0 for target-only')
+    parser.add_argument('--adaptive-window', type=int, default=0,
+                        help='acceptance observation window; 0 disables adaptive draft depth')
+    parser.add_argument('--adaptive-initial', type=int,
+                        help='initial adaptive draft depth; defaults to --draft-tokens')
     args = parser.parse_args()
+    if args.adaptive_window < 0 or (args.adaptive_window and not args.draft_tokens):
+        parser.error('adaptive window must be nonnegative and requires draft tokens')
+    if args.adaptive_initial is not None and (
+        not args.adaptive_window or not 1 <= args.adaptive_initial <= args.draft_tokens
+    ):
+        parser.error('adaptive initial requires a window and must be within 1..draft-tokens')
     config = json.loads(Path(args.from_config).read_text())
     defaults = json.loads((HERE / 'cluster-c16.json').read_text())
     for key in ('image', 'max_num_seqs', 'max_model_len', 'gpu_memory_utilization', 'roce_optimizations'):
         config[key] = defaults[key]
     config['max_num_batched_tokens'] = 8192 if args.prefill8192 else 4096
     config['draft_tokens'] = args.draft_tokens
+    for key in ('adaptive_speculative_tokens_window', 'adaptive_speculative_tokens_initial'):
+        config.pop(key, None)
+    if args.adaptive_window:
+        config['adaptive_speculative_tokens_window'] = args.adaptive_window
+        config['adaptive_speculative_tokens_initial'] = (
+            args.adaptive_initial if args.adaptive_initial is not None else args.draft_tokens
+        )
     if args.control:
         config['roce_optimizations'] = {key: False for key in defaults['roce_optimizations']}
     for node in config['nodes']:

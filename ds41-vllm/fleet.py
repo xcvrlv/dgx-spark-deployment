@@ -32,6 +32,12 @@ def load_config(path):
     assert 0 < c['gpu_memory_utilization'] < 1
     assert 0 < c['max_model_len'] <= 1048576
     assert c['draft_tokens'] in (0, 1, 3, 5, 7)
+    window = c.get('adaptive_speculative_tokens_window')
+    initial = c.get('adaptive_speculative_tokens_initial')
+    if window is not None:
+        assert type(window) is int and window > 0 and c['draft_tokens'] > 0, 'Invalid adaptive window'
+    if initial is not None:
+        assert window is not None and type(initial) is int and 1 <= initial <= c['draft_tokens'], 'Invalid adaptive initial depth'
     assert c['max_num_batched_tokens'] >= c['max_num_seqs'] * (1 + 2 * c['draft_tokens']), \
         'Batch capacity must cover DSpark parallel-drafting profiling rows'
     for key in ('model_path', 'cache_path'):
@@ -141,7 +147,10 @@ def serve_args(c, rank):
             'method': 'dspark', 'num_speculative_tokens': c['draft_tokens'],
             'draft_tensor_parallel_size': 4, 'attention_backend': 'B12X',
             'draft_sample_method': 'greedy', 'rejection_sample_method': 'standard',
-            'enable_adaptive_verification': True})]
+            'enable_adaptive_verification': True,
+            **{key: c[key] for key in (
+                'adaptive_speculative_tokens_window', 'adaptive_speculative_tokens_initial'
+            ) if c.get(key) is not None}})]
     if rank:
         cmd += ['--headless']
     return cmd

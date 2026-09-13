@@ -128,6 +128,31 @@ class FleetTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, 'profiling rows'):
                 fleet.load_config(output)
 
+    def test_adaptive_profile_generation_launch_and_rollback(self):
+        with tempfile.TemporaryDirectory() as d:
+            source, adaptive, fixed = [Path(d) / n for n in ('source.json', 'adaptive.json', 'fixed.json')]
+            source.write_text(json.dumps(self.c))
+            with patch.object(sys, 'argv', ['configure-c16.py', '--from-config', str(source), '--output', str(adaptive), '--adaptive-window', '32', '--adaptive-initial', '7']):
+                runpy.run_path(str(ROOT / 'configure-c16.py'), run_name='__main__')
+            c = fleet.load_config(adaptive)
+            args = fleet.serve_args(c, 0)
+            spec = json.loads(args[args.index('--speculative-config') + 1])
+            self.assertEqual(spec['adaptive_speculative_tokens_window'], 32)
+            self.assertEqual(spec['adaptive_speculative_tokens_initial'], 7)
+            self.assertEqual(spec['num_speculative_tokens'], 7)
+            graph = json.loads(args[args.index('--compilation-config') + 1])
+            self.assertEqual(graph['cudagraph_capture_sizes'], list(range(1, 129)))
+            with patch.object(sys, 'argv', ['configure-c16.py', '--from-config', str(adaptive), '--output', str(fixed)]):
+                runpy.run_path(str(ROOT / 'configure-c16.py'), run_name='__main__')
+            self.assertNotIn('adaptive_speculative_tokens_window', fleet.load_config(fixed))
+            for updates in ({'adaptive_speculative_tokens_window': 0},
+                            {'adaptive_speculative_tokens_initial': 8},
+                            {'draft_tokens': 0}):
+                bad = dict(c, **updates)
+                fixed.write_text(json.dumps(bad))
+                with self.assertRaises(AssertionError):
+                    fleet.load_config(fixed)
+
     def test_flat_checkpoint_used_by_serving_and_preflight(self):
         self.c['model_path'] = '/srv/DeepSeek-V4.1-Flash-MXFP4-FP4-Engram'
         self.c['model_subpath'] = '.'
