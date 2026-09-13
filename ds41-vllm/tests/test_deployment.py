@@ -153,6 +153,26 @@ class FleetTests(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     fleet.load_config(fixed)
 
+    def test_profile_is_opt_in_and_preserves_serving_limits(self):
+        c = copy.deepcopy(self.c)
+        self.assertNotIn('--profiler-config', fleet.serve_args(c, 0))
+        c['torch_profile'] = True
+        c['gpu_memory_utilization'] = 0.85
+        args = fleet.serve_args(c, 0)
+        profile = json.loads(args[args.index('--profiler-config') + 1])
+        self.assertEqual(profile['profiler'], 'torch')
+        self.assertEqual(profile['torch_profiler_dir'], '/cache/profiles')
+        self.assertEqual(args[args.index('--gpu-memory-utilization') + 1], '0.85')
+
+    def test_rdma_counter_units_and_reset_detection(self):
+        import observe
+        key = '/sys/class/infiniband/hca/ports/1/counters/port_xmit_data'
+        before = {'0': {'time': 10, 'counters': {key: 100, 'errors': 3}}}
+        after = {'0': {'time': 12, 'counters': {key: 200, 'errors': 1}}}
+        counters = observe.delta(before, after)['0']['counters']
+        self.assertEqual(counters[key]['bytes_per_second'], 200)
+        self.assertTrue(counters['errors']['reset_or_wrap'])
+
     def test_flat_checkpoint_used_by_serving_and_preflight(self):
         self.c['model_path'] = '/srv/DeepSeek-V4.1-Flash-MXFP4-FP4-Engram'
         self.c['model_subpath'] = '.'

@@ -151,6 +151,12 @@ def serve_args(c, rank):
             **{key: c[key] for key in (
                 'adaptive_speculative_tokens_window', 'adaptive_speculative_tokens_initial'
             ) if c.get(key) is not None}})]
+    if c.get('torch_profile', False):
+        cmd += ['--profiler-config', json.dumps({
+            'profiler': 'torch', 'torch_profiler_dir': '/cache/profiles',
+            'torch_profiler_with_stack': False,
+            'torch_profiler_record_shapes': True,
+            'torch_profiler_with_memory': False})]
     if rank:
         cmd += ['--headless']
     return cmd
