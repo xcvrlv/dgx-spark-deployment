@@ -11,12 +11,15 @@ if __name__ == '__main__':
     parser.add_argument('--output', default=str(HERE / '.build/cluster-c16.json'))
     parser.add_argument('--control', action='store_true', help='disable all four RoCEnante port switches')
     parser.add_argument('--prefill8192', action='store_true', help='experimental larger prefill batches')
+    parser.add_argument('--draft-tokens', type=int, choices=(0, 1, 3, 5, 7), default=7,
+                        help='DSpark depth; current recipe defaults to 7, use 0 for target-only')
     args = parser.parse_args()
     config = json.loads(Path(args.from_config).read_text())
     defaults = json.loads((HERE / 'cluster-c16.json').read_text())
     for key in ('image', 'max_num_seqs', 'max_model_len', 'gpu_memory_utilization', 'roce_optimizations'):
         config[key] = defaults[key]
     config['max_num_batched_tokens'] = 8192 if args.prefill8192 else 4096
+    config['draft_tokens'] = args.draft_tokens
     if args.control:
         config['roce_optimizations'] = {key: False for key in defaults['roce_optimizations']}
     for node in config['nodes']:

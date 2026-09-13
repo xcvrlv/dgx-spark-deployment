@@ -1,3 +1,5 @@
+Current build/defaults: see [latest JJ update](UPSTREAM-R37.md). Older profiles and audit snapshots below are historical.
+
 # c16 communication candidate — 2026-09-13
 
 The new default is **16 sequences, 393216 tokens (384 × 1024), GPU memory

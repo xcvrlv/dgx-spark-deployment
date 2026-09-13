@@ -1,3 +1,5 @@
+Current build/defaults: see [latest JJ update](UPSTREAM-R37.md). Older profiles and audit snapshots below are historical.
+
 # DeepSeek V4.1 Flash — JJ + b12x, four Sparks
 
 **Current candidate: c16, 384K context, GPU utilization 0.88, new upstream pins

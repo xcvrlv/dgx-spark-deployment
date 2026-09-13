@@ -1,3 +1,5 @@
+Current build/defaults: see [latest JJ update](UPSTREAM-R37.md). Older profiles and audit snapshots below are historical.
+
 # Text prefill audit: JJ + b12x on SM121
 
 Checked 2026-09-13 at 11:35 UTC against live upstream heads: JJ

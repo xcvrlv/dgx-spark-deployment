@@ -1,5 +1,5 @@
 {
-  "image": "spark-vllm-ds41:jj-b40673c-b12x-9043b44-roce-v1-sm121",
+  "image": "spark-vllm-ds41:jj-9342b1a-b12x-fd3c638-roce-v1-hashes-v1-sm121",
   "model_path": "/home/juho/.cache/huggingface/hub/DeepSeek-V4.1-Flash-MXFP4-FP4-Engram",
   "revision": "fb2764a5cf321eaa5070ca8f9e892818f477c16d",
   "cache_path": "/var/tmp/ds41-jj-cache",
@@ -33,7 +33,7 @@
   "max_num_seqs": 16,
   "max_num_batched_tokens": 4096,
   "gpu_memory_utilization": 0.88,
-  "draft_tokens": 0,
+  "draft_tokens": 7,
   "startup_timeout": 3600,
   "model_subpath": ".",
   "roce_optimizations": {

@@ -32,6 +32,8 @@ def load_config(path):
     assert 0 < c['gpu_memory_utilization'] < 1
     assert 0 < c['max_model_len'] <= 1048576
     assert c['draft_tokens'] in (0, 1, 3, 5, 7)
+    assert c['max_num_batched_tokens'] >= c['max_num_seqs'] * (1 + 2 * c['draft_tokens']), \
+        'Batch capacity must cover DSpark parallel-drafting profiling rows'
     for key in ('model_path', 'cache_path'):
         assert c[key].startswith('/') and c[key] != '/' and ',' not in c[key]
     checkpoint_path(c, '/checkpoint')

@@ -22,6 +22,13 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/local-inferenc
     && python3 -c 'import torch; print("torch==" + torch.__version__)' > /tmp/torch-constraint.txt \
     && python3 -m pip install --no-cache-dir -c /tmp/torch-constraint.txt /opt/b12x pytest
 COPY patches/ /opt/ds41/patches/
+ARG PREFILL_HASHES=1
+RUN if [ "$PREFILL_HASHES" = 1 ]; then \
+      package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")"; \
+      python3 /opt/ds41/patches/prefill_hashes.py "$package" \
+      && python3 /opt/ds41/patches/prefill_hashes.py "$package" --check; \
+    else test "$PREFILL_HASHES" = 0; fi
+LABEL local-inference.prefill-hash-overlay="${PREFILL_HASHES}"
 # Apply only the audited communication port to source and installed wheel.
 RUN python3 /opt/ds41/patches/roce.py /opt/b12x/b12x \
     && package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \

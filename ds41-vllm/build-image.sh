@@ -2,6 +2,7 @@
 set -euo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/versions.env"
+if [[ ${PREFILL_HASHES:-1} == 0 ]]; then IMAGE="${IMAGE}-hashes-off"; fi
 [[ $(uname -m) == aarch64 ]] || { echo 'Build natively on a Spark (ARM64).' >&2; exit 1; }
 mkdir -p "$here/.build"
 python3 "$here/check-upstream.py" --output "$here/.build/upstream-check.json"
@@ -31,6 +32,7 @@ base_id="$(docker image inspect --format '{{.Id}}' "$base")"
 docker build --platform linux/arm64 --file "$here/Dockerfile" \
   --build-arg JJ_IMAGE="$base" --build-arg B12X_COMMIT="$B12X_COMMIT" \
   --build-arg VLLM_COMMIT="$VLLM_COMMIT" \
+  --build-arg PREFILL_HASHES="${PREFILL_HASHES:-1}" \
   --label "local-inference.jj-base-id=$base_id" --tag "$IMAGE" "$here"
 [[ $(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE") == linux/arm64 ]]
 docker run --rm --gpus all --entrypoint python3 "$IMAGE" /opt/ds41/image-check.py --gpu

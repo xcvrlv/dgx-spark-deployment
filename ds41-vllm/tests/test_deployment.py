@@ -97,7 +97,10 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(args[args.index('--max-model-len') + 1], '393216')
         self.assertEqual(args[args.index('--gpu-memory-utilization') + 1], '0.88')
         compilation = json.loads(args[args.index('--compilation-config') + 1])
-        self.assertEqual(compilation['cudagraph_capture_sizes'], list(range(1, 17)))
+        self.assertEqual(compilation['cudagraph_capture_sizes'], list(range(1, 129)))
+        draft = json.loads(args[args.index('--speculative-config') + 1])
+        self.assertEqual(draft['num_speculative_tokens'], 7)
+        self.assertEqual(draft['method'], 'dspark')
         c['draft_tokens'] = 3
         args = fleet.serve_args(c, 0)
         compilation = json.loads(args[args.index('--compilation-config') + 1])
@@ -106,6 +109,24 @@ class FleetTests(unittest.TestCase):
         c['roce_optimizations']['inline_payload'] = False
         self.assertEqual(fleet.environment(c, 0)['B12X_ROCE_INLINE_PAYLOAD'], '0')
         self.assertEqual(fleet.environment(c, 0)['B12X_ROCE_SKIP_EMPTY_CQ'], '1')
+
+    def test_configure_explicitly_selects_dspark7_and_preserves_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            source, output = Path(d) / 'old.json', Path(d) / 'new.json'
+            old = copy.deepcopy(self.c)
+            old['draft_tokens'] = 0
+            old['model_path'] = '/srv/operator-checkpoint'
+            source.write_text(json.dumps(old))
+            with patch.object(sys, 'argv', ['configure-c16.py', '--from-config', str(source), '--output', str(output)]):
+                runpy.run_path(str(ROOT / 'configure-c16.py'), run_name='__main__')
+            result = fleet.load_config(output)
+            self.assertEqual(result['draft_tokens'], 7)
+            self.assertEqual(result['model_path'], old['model_path'])
+            self.assertEqual(result['gpu_memory_utilization'], 0.88)
+            result['max_num_batched_tokens'] = 128
+            output.write_text(json.dumps(result))
+            with self.assertRaisesRegex(AssertionError, 'profiling rows'):
+                fleet.load_config(output)
 
     def test_flat_checkpoint_used_by_serving_and_preflight(self):
         self.c['model_path'] = '/srv/DeepSeek-V4.1-Flash-MXFP4-FP4-Engram'
