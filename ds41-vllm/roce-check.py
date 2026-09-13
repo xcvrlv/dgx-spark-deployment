@@ -17,7 +17,7 @@ rank = dist.get_rank()
 adapter = B12xRoceAllReduce(dist.group.WORLD, nccl, torch.device('cuda', 0))
 assert not adapter.disabled, 'vLLM disabled RoCEnante'
 rt = adapter._runtime
-assert rt.hca_names == os.environ['B12X_ROCE_HCA'].split(','), rt.hca_names
+assert tuple(rt.hca_names) == tuple(os.environ['B12X_ROCE_HCA'].split(',')), rt.hca_names
 rt.prepare((torch.bfloat16, torch.float32, torch.float16))
 before = rt.stats()['bytes_posted_per_hca']
 for dtype in (torch.bfloat16, torch.float16, torch.float32):

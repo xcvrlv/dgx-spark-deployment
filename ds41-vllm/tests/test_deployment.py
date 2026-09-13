@@ -1,4 +1,5 @@
 import copy
+import ast
 import hashlib
 import importlib.util
 import json
@@ -19,6 +20,20 @@ import fleet
 spec = importlib.util.spec_from_file_location('model_check', ROOT / 'model-check.py')
 model_check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(model_check)
+
+
+class RoceCheckTests(unittest.TestCase):
+    def test_hca_comparison_accepts_sequence_types_but_preserves_order(self):
+        tree = ast.parse((ROOT / 'roce-check.py').read_text())
+        check = next(node for node in tree.body if isinstance(node, ast.Assert)
+                     and 'rt.hca_names' in ast.unparse(node.test))
+        expression = compile(ast.Expression(check.test), '<hca-check>', 'eval')
+        expected = ['rocep1s0f0', 'roceP2p1s0f0']
+        for actual, passes in ((expected, True), (tuple(expected), True),
+                               (expected[::-1], False), (expected[:1], False)):
+            scope = {'rt': SimpleNamespace(hca_names=actual),
+                     'os': SimpleNamespace(environ={'B12X_ROCE_HCA': ','.join(expected)})}
+            self.assertEqual(eval(expression, scope), passes)
 
 
 class ImageCheckTests(unittest.TestCase):
