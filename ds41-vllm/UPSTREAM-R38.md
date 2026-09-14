@@ -180,3 +180,36 @@ python3 fleet.py --config .build/cluster-r38-c8.json start
 function, validation of all three supported dtypes and runtime dictionary keys,
 and source guard/idempotence/rollback checks. Actual GPU compilation, four-node
 collective correctness and CUDA graph replay still require fleet qualification.
+
+
+## RoCEnante compiled-program metadata fix
+
+Checked again 2026-09-14 15:40 UTC: latest JJ is
+ab03e87100efa9536ec87e01994828b459c956ff, latest b12x is
+9e90d60f0cc8f204aa2fd219ed9b6abee32de7d8. Both RoCE launcher files remain
+byte-identical to our pinned b12x version, so upstream does not supersede this
+repair. Pins stay unchanged.
+
+The dtype repair exposes a second failure: compile_roce returns launcher
+closures without __b12x_programs__, and describe_compilation rejects them with
+"compile factory returned an unannotated function". This is the same preparation
+path used by serving. Skipping fabric qualification would not fix that path.
+
+patches/roce_programs.py applies the existing PCIe launcher pattern:
+return attach_programs(run, raw). It retains both exact program keys and the
+compiled dependency for all-reduce and all-gather. It does not disable program
+validation or change kernels. Both source hashes are guarded before either file
+is changed; --check and independent --revert are supported.
+
+The repair script now defaults to the previously built -dtype-v1 image and
+produces -dtype-v1-programs-v1. Use the same repair/share/stop/start command above,
+which preserves existing recipe settings. BASE_IMAGE may select the original
+R38 image instead; the script applies both repairs idempotently. Full builds
+also include both repairs. Roll back the image through the config if needed;
+reverting this metadata fix restores the known preparation failure.
+
+37 CPU tests pass. New tests execute the actual upstream launcher factories
+with a fake GPU compiler and the real metadata functions, checking exact keys
+and retained dependencies for both launchers, plus hash guards and rollback.
+No GPU execution was performed here; fleet qualification remains required to
+establish collective correctness and CUDA replay on the four Sparks.
