@@ -22,6 +22,12 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/local-inferenc
     && python3 -c 'import torch; print("torch==" + torch.__version__)' > /tmp/torch-constraint.txt \
     && python3 -m pip install --no-cache-dir -c /tmp/torch-constraint.txt /opt/b12x pytest
 COPY patches/ /opt/ds41/patches/
+RUN python3 /opt/ds41/patches/roce_dtype.py /opt/b12x/b12x \
+    && package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \
+    && python3 /opt/ds41/patches/roce_dtype.py "$package" \
+    && python3 /opt/ds41/patches/roce_dtype.py "$package" --check
+LABEL local-inference.roce-dtype="v1"
+
 ARG PREFILL_HASHES=1
 RUN if [ "$PREFILL_HASHES" = 1 ]; then \
       package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")"; \

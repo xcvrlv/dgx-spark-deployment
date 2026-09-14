@@ -134,3 +134,49 @@ original tag-discovery behavior is desired. No CUDA/Rust code was patched.
 33 CPU tests pass, including a real temporary Git repository reproducing tag
 selection and checking filtering, normal-tag preservation, idempotence, rollback
 and unchanged HEAD/worktree. The ARM64 Docker build still must run on the Spark.
+
+
+## RoCEnante preparation dtype fix
+
+Checked upstream again 2026-09-14 15:18 UTC: JJ ab03e87100efa9536ec87e01994828b459c956ff
+and b12x 9e90d60f0cc8f204aa2fd219ed9b6abee32de7d8 are newer than our pins.
+The latest b12x RoCE preparation file is byte-identical to our pinned version;
+it still passes torch.dtype objects to a launcher requiring dtype-name strings.
+Pins remain unchanged for this targeted repair.
+
+patches/roce_dtype.py converts only the launcher argument to float16, bfloat16,
+or float32. The prepared-program dictionary retains torch.dtype keys because
+runtime lookup uses inp.dtype. Both retained b12x source and installed package
+are patched. The exact source SHA is guarded; --check verifies application and
+--revert restores the original. This patch is independent of the four transport
+optimizations. The image tag gains -dtype-v1 and label local-inference.roce-dtype=v1.
+The later contextlib destructor errors in the failed fabric log occur during
+shutdown after the preparation failure.
+
+For an already-built R38 image, copy the updated recipe and use the small child
+image below. This preserves the existing launch settings and avoids recompiling
+vLLM. BASE_IMAGE can override the existing image tag if it was customized.
+
+```bash
+(
+set -euo pipefail
+bash repair-roce-image.sh
+source versions.env
+python3 - "$IMAGE" <<'PY'
+import json, sys
+from pathlib import Path
+p = Path(".build/cluster-r38-c8.json")
+c = json.loads(p.read_text())
+c["image"] = sys.argv[1]
+p.write_text(json.dumps(c, indent=2) + "\n")
+PY
+python3 fleet.py --config .build/cluster-r38-c8.json share
+python3 fleet.py --config .build/cluster-r38-c8.json stop
+python3 fleet.py --config .build/cluster-r38-c8.json start
+)
+```
+
+35 CPU tests pass, including reproduction using the upstream compile_roce
+function, validation of all three supported dtypes and runtime dictionary keys,
+and source guard/idempotence/rollback checks. Actual GPU compilation, four-node
+collective correctness and CUDA graph replay still require fleet qualification.
