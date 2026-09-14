@@ -243,47 +243,69 @@ qualification on the four Sparks is still required for correctness and replay.
 
 ## Serving autotuning reduction
 
+Motivated by CUDA OOM during candidate racing: the race memory budget defaults
+to half of free GPU memory, race_batch defaults to 32 resident candidates per
+batch, and the per-trial residency snapshot excludes measurement buffers and
+fragmentation, so races can overdraw the device in both lifecycle stages.
+
 Checked upstream 2026-09-14 21:54 UTC: both heads moved since our pins (JJ
 26c055577be301bb35039d5c83c0fe29a4b9aaf8, b12x
 b0a0381335ebab1ae7aa867a0c8c83e9d68052e0). The head's get_b12x_session still
 passes neither rounds nor samples to PreparationSession, and still carries the
 exact anchor this patch replaces, so upstream does not supersede the proposed
-work. Pins stay unchanged; the build's check-upstream.py re-reports the heads
-and the patch hash guard fails closed on drift.
+work. Rechecked 2026-09-14 23:05 UTC: the JJ head is unchanged and the b12x
+head advanced again to 40bcdf82a03b23c7ac45efc30d13f6b9516e35e5, whose
+PreparationSession still declares race_batch=32 and race_budget=None, so
+upstream still does not supersede. Pins stay unchanged; the build's
+check-upstream.py re-reports the heads and the patch hash guard fails closed
+on drift.
 
-Startup autotuning volume has two levers. First, fleet.py captured a cudagraph
-size for every decode batch 1..48 at r38-c8, and b12x_preparation_token_counts
-turns that into 50 exact serving specializations; norm.mhc's query includes
-max_tokens, so each shape is a separate declaration with its own candidate
-race. The capture list is now a sparse spread capped at the maximum:
-1,2,4,8,16,32,48 gives 13 exact specializations, roughly 4x fewer
-declarations. Decode batches pad to the nearest captured size
-(uniform-decode rounding through planned_token_counts), which coarsens
-mid-batch padding; the smoke concurrency of 8 still hits the cap exactly.
+Startup autotuning volume has three levers. First, fleet.py captured a
+cudagraph size for every decode batch 1..48 at r38-c8, and
+b12x_preparation_token_counts turns that into 50 exact serving
+specializations; norm.mhc's query includes max_tokens, so each shape is a
+separate declaration with its own candidate race. The capture list is now a
+minimal base plus the cap: 1,2,8,48 gives 8 exact specializations. For
+comparison, dropping the override entirely (upstream default,
+performance_mode balanced) yields 15 captured sizes up to 96 and roughly 22
+specializations, so the upstream default is the wrong direction for tuning
+volume. Decode batches pad to the nearest captured size, which coarsens
+mid-batch padding: 3-7 request decode batches pad to the 8-request cap; the
+smoke concurrency of 8 still hits the cap exactly.
 
-Second, patches/b12x_tuning.py reduces the serving tuning budget:
-get_b12x_session passed only autotune and compile_workers, while
-PreparationSession defaults to SURVIVOR_ROUNDS=3 rounds with 8 timed samples
-per candidate per round. The patch passes rounds=1, samples=4, cutting timed
-GPU work about 6x per candidate. b12x's own recorded race evidence
-(preparation/_measurement.py): round-to-round spread stays under 4% and the
-eventual winner never trailed the first round's leader by more than 0.2%, so
-the extra rounds almost never change the outcome. Winners are provisional
-until benchmarked on the target path.
+Second, patches/b12x_tuning.py reduces the serving tuning budget and bounds
+its resident memory: get_b12x_session passed only autotune and
+compile_workers, while PreparationSession defaults to SURVIVOR_ROUNDS=3
+rounds with 8 timed samples per candidate per round, race_batch=32 resident
+candidates per batch, and race_budget = half of free GPU memory. The patch
+passes rounds=1, samples=4, race_batch=8, race_budget=4GiB, cutting timed GPU
+work about 6x per candidate and capping resident candidate memory per race
+batch instead of letting it reach half the device. b12x's own recorded race
+evidence (preparation/_measurement.py): round-to-round spread stays under 4%
+and the eventual winner never trailed the first round's leader by more than
+0.2%, so the extra rounds almost never change the outcome, and the
+champion-carrying design keeps winner choice head-to-head at any batch size.
+Winners are provisional until benchmarked on the target path. A single
+candidate whose residency exceeds race_budget is still prepared (mandatory
+preparation always runs), so a legal huge-shape config can still OOM if the
+device is truly exhausted.
 
 Both changes are reversible. The patch is hash-guarded against the pinned
 vllm source 2213eb87da148aba3508547dcb25585b69b2d6d28da211befa0bc9c5487eecaf;
---check verifies application and --revert restores it. The image tag gains
--tuning-v1 and label local-inference.b12x-tuning=v1; preflight guards the
-label while reduced_tuning is not false in the fleet config, so a stale bake
-fails fast, and a rollback rebuild passes after setting reduced_tuning=false.
-Separately, the observed SystemExit preparation failures are shutdown signals
-(SIGTERM/SIGINT via the WorkerProc handler, the only bare-SystemExit source)
-that the startup coordinator reports as preparation errors, not b12x failures;
-identifying the trigger requires the full rank-0 container logs.
+--check verifies application, --revert restores it, and re-applying over an
+image baked with the previous patch form repairs it in place. The image tag
+gains -tuning-v2 and label local-inference.b12x-tuning=v1; preflight guards
+the label while reduced_tuning is not false in the fleet config, so a stale
+bake fails fast, and a rollback rebuild passes after setting
+reduced_tuning=false. Separately, the observed SystemExit preparation failures
+are shutdown signals (SIGTERM/SIGINT via the WorkerProc handler, the only
+bare-SystemExit source) that the startup coordinator reports as preparation
+errors, not b12x failures; identifying the trigger requires the full rank-0
+container logs.
 
-41 CPU tests pass, including the patch's guard/idempotence/rollback checks
-against the pinned tree, the pinned anchor assertion, the new capture-size
-lists for every profile, and the preflight label guard with rollback. GPU
-qualification on the four Sparks is still required to establish collective
-correctness, replay, and the actual fleet speedup.
+42 CPU tests pass, including the patch's guard/idempotence/rollback checks
+against the pinned tree, the prior-patch-variant repair check, the pinned
+anchor assertion, the new capture-size lists for every profile, and the
+preflight label guard with rollback. GPU qualification on the four Sparks is
+still required to establish collective correctness, replay, and the actual
+fleet speedup.

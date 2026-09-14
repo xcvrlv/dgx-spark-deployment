@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Reduce serving tuning budget to rounds=1, samples=4; checked against vllm c9dc4e5 on 2026-09-15."""
+"""Reduce serving tuning budget: rounds=1, samples=4, race_batch=8, race_budget=4GiB; checked against vllm c9dc4e5 on 2026-09-15.
+
+race_budget caps the resident candidate memory per race batch (b12x default is
+half of free GPU memory); race_batch bounds candidates per batch (default 32).
+"""
 import argparse
 import hashlib
 from pathlib import Path
@@ -7,13 +11,17 @@ from pathlib import Path
 RELATIVE = 'model_executor/warmup/b12x_prepare.py'
 SOURCE_SHA = '2213eb87da148aba3508547dcb25585b69b2d6d28da211befa0bc9c5487eecaf'
 OLD = b'        compile_workers=16,\n    )'
-NEW = b'        compile_workers=16,\n        rounds=1, samples=4,\n    )'
+NEW = b'        compile_workers=16,\n        rounds=1, samples=4, race_batch=8, race_budget=4 * (1 << 30),\n    )'
+PRIOR = (b'        compile_workers=16,\n        rounds=1, samples=4,\n    )',)
 
 
 def patch(root, *, check=False, revert=False):
     path = Path(root) / RELATIVE
     data = path.read_bytes()
-    original = data.replace(NEW, OLD, 1) if data.count(NEW) == 1 else data
+    original = data
+    for applied in (NEW,) + PRIOR:
+        if original.count(applied) == 1:
+            original = original.replace(applied, OLD, 1)
     if hashlib.sha256(original).hexdigest() != SOURCE_SHA or original.count(OLD) != 1:
         raise RuntimeError(f'Unexpected upstream source: {path}; re-audit before patching')
     expected = original if revert else original.replace(OLD, NEW, 1)

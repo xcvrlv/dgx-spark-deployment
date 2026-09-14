@@ -144,9 +144,11 @@ def serve_args(c, rank):
     depth = c['draft_tokens'] + 1
     maximum = c['max_num_seqs'] * depth
     # Sparse spread: every captured size is a separate b12x tuning declaration,
-    # so powers of two plus the cap shrink preparation proportionally. Decode
-    # batches pad up to the nearest captured size.
-    sizes = sorted({size for size in (1, 2, 4, 8, 16, 32, 64) if size <= maximum} | {maximum})
+    # so a minimal base plus the cap shrinks preparation and its resident
+    # candidate memory proportionally. Decode batches pad up to the nearest
+    # captured size, so the base keeps single-token interactivity while
+    # mid-size decode batches pad to the cap.
+    sizes = sorted({size for size in (1, 2, 8) if size <= maximum} | {maximum})
     compilation = {'cudagraph_mode': 'FULL_AND_PIECEWISE', 'custom_ops': ['all'],
                    'cudagraph_capture_sizes': sizes,
                    'pass_config': {'fuse_allreduce_rms': False}}

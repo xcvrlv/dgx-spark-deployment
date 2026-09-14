@@ -25,6 +25,7 @@ class B12xTuningPatchTests(unittest.TestCase):
             p.patch(root, check=True)
             patched = dest.read_bytes()
             self.assertIn(b'rounds=1, samples=4,', patched)
+            self.assertIn(b'race_batch=8, race_budget=4 * (1 << 30),', patched)
             self.assertNotIn(b'rounds=1, samples=4,', (SOURCE/p.RELATIVE).read_bytes())
             ast.parse(patched.decode())
             p.patch(root, revert=True)
@@ -32,6 +33,18 @@ class B12xTuningPatchTests(unittest.TestCase):
             dest.write_bytes(dest.read_bytes()+b'# source drift\n')
             with self.assertRaises(RuntimeError):
                 p.patch(root)
+
+    def test_repairs_prior_patch_variant(self):
+        # Images built with the previous patch form re-apply cleanly; unknown
+        # drift still fails closed.
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            dest = root/p.RELATIVE
+            dest.parent.mkdir(parents=True)
+            pristine = (SOURCE/p.RELATIVE).read_bytes()
+            dest.write_bytes(pristine.replace(p.OLD, p.PRIOR[0], 1))
+            p.patch(root)
+            self.assertEqual(dest.read_bytes(), pristine.replace(p.OLD, p.NEW, 1))
 
     def test_pinned_source_matches_patch_anchor(self):
         # The hash guard fails closed on upstream drift; this asserts the
