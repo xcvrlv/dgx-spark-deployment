@@ -27,6 +27,7 @@ def load_config(path):
     assert len({n['ip'] for n in c['nodes']}) == 4
     assert len(c['hcas']) == 2
     assert type(c.get('graph_request_buckets', False)) is bool
+    assert type(c.get('reduced_tuning', True)) is bool
     assert c['max_num_seqs'] in (8, 16), 'Supported profiles: c8 and c16'
     assert set(c.get('roce_optimizations', {})) <= set(ROCE_OPTIONS)
     assert all(type(v) is bool for v in c.get('roce_optimizations', {}).values())
@@ -141,8 +142,13 @@ def serve_args(c, rank):
            '--generation-config', 'vllm', '--reasoning-parser', 'deepseek_v41',
            '--tool-call-parser', 'deepseek_v41', '--enable-auto-tool-choice']
     depth = c['draft_tokens'] + 1
+    maximum = c['max_num_seqs'] * depth
+    # Sparse spread: every captured size is a separate b12x tuning declaration,
+    # so powers of two plus the cap shrink preparation proportionally. Decode
+    # batches pad up to the nearest captured size.
+    sizes = sorted({size for size in (1, 2, 4, 8, 16, 32, 64) if size <= maximum} | {maximum})
     compilation = {'cudagraph_mode': 'FULL_AND_PIECEWISE', 'custom_ops': ['all'],
-                   'cudagraph_capture_sizes': list(range(1, c['max_num_seqs'] * depth + 1)),
+                   'cudagraph_capture_sizes': sizes,
                    'pass_config': {'fuse_allreduce_rms': False}}
     cmd += ['--compilation-config', json.dumps(compilation)]
     if c['draft_tokens']:
@@ -184,6 +190,9 @@ def preflight(c):
         if any(c.get('roce_optimizations', {}).values()):
             script += shlex.join(['docker', 'image', 'inspect', '--format',
                                   '{{index .Config.Labels "local-inference.roce-overlay"}}', c['image']]) + " | grep -qx ds41-roce-v1\n"
+        if c.get('reduced_tuning', True):
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.b12x-tuning"}}', c['image']]) + " | grep -qx v1\n"
         script += f"fstype=$(findmnt -n -o FSTYPE -T {shlex.quote(c['model_path'])})\n"
         script += 'case "$fstype" in ext4|xfs|btrfs) ;; *) echo "Model must be local SSD storage, got $fstype"; exit 1;; esac\n'
         for hca in c['hcas']:

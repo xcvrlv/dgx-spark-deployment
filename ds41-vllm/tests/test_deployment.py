@@ -88,7 +88,7 @@ class FleetTests(unittest.TestCase):
         self.c['draft_tokens'] = 3
         args = fleet.serve_args(self.c, 0)
         config = json.loads(args[args.index('--compilation-config') + 1])
-        self.assertEqual(config['cudagraph_capture_sizes'], list(range(1, 33)))
+        self.assertEqual(config['cudagraph_capture_sizes'], [1, 2, 4, 8, 16, 32])
         draft = json.loads(args[args.index('--speculative-config') + 1])
         self.assertEqual(draft['draft_tensor_parallel_size'], 4)
 
@@ -99,14 +99,14 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(args[args.index('--max-model-len') + 1], '393216')
         self.assertEqual(args[args.index('--gpu-memory-utilization') + 1], '0.88')
         compilation = json.loads(args[args.index('--compilation-config') + 1])
-        self.assertEqual(compilation['cudagraph_capture_sizes'], list(range(1, 129)))
+        self.assertEqual(compilation['cudagraph_capture_sizes'], [1, 2, 4, 8, 16, 32, 64, 128])
         draft = json.loads(args[args.index('--speculative-config') + 1])
         self.assertEqual(draft['num_speculative_tokens'], 7)
         self.assertEqual(draft['method'], 'dspark')
         c['draft_tokens'] = 3
         args = fleet.serve_args(c, 0)
         compilation = json.loads(args[args.index('--compilation-config') + 1])
-        self.assertEqual(compilation['cudagraph_capture_sizes'], list(range(1, 65)))
+        self.assertEqual(compilation['cudagraph_capture_sizes'], [1, 2, 4, 8, 16, 32, 64])
         self.assertTrue(all(fleet.environment(c, 0)[key] == '1' for key in fleet.ROCE_OPTIONS.values()))
         c['roce_optimizations']['inline_payload'] = False
         self.assertEqual(fleet.environment(c, 0)['B12X_ROCE_INLINE_PAYLOAD'], '0')
@@ -143,7 +143,7 @@ class FleetTests(unittest.TestCase):
             self.assertEqual(spec['adaptive_speculative_tokens_initial'], 7)
             self.assertEqual(spec['num_speculative_tokens'], 7)
             graph = json.loads(args[args.index('--compilation-config') + 1])
-            self.assertEqual(graph['cudagraph_capture_sizes'], list(range(1, 129)))
+            self.assertEqual(graph['cudagraph_capture_sizes'], [1, 2, 4, 8, 16, 32, 64, 128])
             with patch.object(sys, 'argv', ['configure-c16.py', '--from-config', str(adaptive), '--output', str(fixed)]):
                 runpy.run_path(str(ROOT / 'configure-c16.py'), run_name='__main__')
             self.assertNotIn('adaptive_speculative_tokens_window', fleet.load_config(fixed))
@@ -211,7 +211,7 @@ class FleetTests(unittest.TestCase):
                             ('--swa-block-size','128')):
             self.assertEqual(args[args.index(flag)+1], value)
         graphs = json.loads(args[args.index('--compilation-config')+1])
-        self.assertEqual(graphs['cudagraph_capture_sizes'],list(range(1,49)))
+        self.assertEqual(graphs['cudagraph_capture_sizes'],[1, 2, 4, 8, 16, 32, 48])
         self.assertEqual(c['draft_tokens'],5)
         with tempfile.TemporaryDirectory() as d:
             source, target = Path(d)/'old.json', Path(d)/'r38.json'
@@ -237,6 +237,16 @@ class FleetTests(unittest.TestCase):
             self.assertIn(self.c['model_path'] + '/config.json', script)
             self.assertIn('/opt/ds41/model-check.py /checkpoint\n', script)
             self.assertNotIn('/snapshots/', script)
+
+    def test_preflight_guards_b12x_tuning_label_and_rolls_back(self):
+        with patch.object(fleet, 'remote', return_value='sha256:same') as remote:
+            fleet.preflight(self.c)
+        self.assertTrue(all('local-inference.b12x-tuning' in call.args[2] for call in remote.call_args_list))
+        c = copy.deepcopy(self.c)
+        c['reduced_tuning'] = False
+        with patch.object(fleet, 'remote', return_value='sha256:same') as remote:
+            fleet.preflight(c)
+        self.assertFalse(any('local-inference.b12x-tuning' in call.args[2] for call in remote.call_args_list))
 
     def test_checkpoint_subpath_cannot_escape_mount(self):
         for subpath in ('../outside', '/outside'):
