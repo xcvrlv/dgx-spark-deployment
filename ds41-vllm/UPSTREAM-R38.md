@@ -213,3 +213,27 @@ with a fake GPU compiler and the real metadata functions, checking exact keys
 and retained dependencies for both launchers, plus hash guards and rollback.
 No GPU execution was performed here; fleet qualification remains required to
 establish collective correctness and CUDA replay on the four Sparks.
+
+## RoCE fabric compile-pool fix
+
+The metadata fix alone leaves one follow-on failure. The fabric check created
+its session with compile_workers=0, which compiles in-process: the RoCE
+launcher factories are functools.cache memoized per argument key, and planning
+evicts only b12x program caches and Triton JIT caches, never functools.cache
+wrappers. On a cold shared compile cache (/cache/b12x/compile, new with this
+b12x fingerprint) the second factory run returns the memoized launcher without
+lowering, no artifact is written, and _wait_programs fails closed with
+"required compiler artifacts are unavailable". Serving never reaches this
+because get_b12x_session uses 16 workers: the spawned offline workers have
+empty memos, lower the launchers for real, and publish the disk objects the
+availability check polls.
+
+roce-check.py now creates its session with compile_workers=16, the same pool
+path serving uses. The pool is created only when a required artifact is
+missing, so a warm cache keeps the check fast; a cold cache compiles once and
+also warms the shared cache for the serving containers. repair-roce-image.sh
+now copies the fixed roce-check.py into the image, since the -dtype-v1 base
+still carries the old in-process check. 38 CPU tests pass; the added test
+walks the full compile_roce carrier dict (dtype keys plus gather) through the
+real metadata functions, which is the exact reported failure path. GPU
+qualification on the four Sparks is still required for correctness and replay.

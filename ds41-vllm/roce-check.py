@@ -26,7 +26,11 @@ workload = B12xWorkload(stage='weights', token_counts=(1,), fixed_token_counts=(
                        max_model_len=393216, eager_only=True)
 units = adapter.get_b12x_preparation_units(adapter, workload)
 assert units, 'RoCE preparation provider returned no units'
-session = PreparationSession(device=torch.device('cuda', 0), autotune=False, compile_workers=0)
+# The pool path is what serving uses (get_b12x_session: 16). With 0 workers
+# the functools.cache-memoized launcher factories never lower the planned
+# programs, and a cold shared compile cache then fails closed as unavailable.
+session = PreparationSession(device=torch.device('cuda', 0), autotune=False,
+                             compile_workers=16)
 session.prepare(tuple(request for unit in units for request in unit.requests))
 plan = adapter._prepared_plan()
 before = rt.stats()['bytes_posted_per_hca']

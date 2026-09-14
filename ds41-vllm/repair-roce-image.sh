@@ -19,6 +19,7 @@ RUN python3 /opt/ds41/patches/roce_dtype.py /opt/b12x/b12x \
     && python3 /opt/ds41/patches/roce_programs.py /opt/b12x/b12x \
     && python3 /opt/ds41/patches/roce_programs.py "$package" \
     && python3 /opt/ds41/patches/roce_programs.py "$package" --check
+COPY roce-check.py /opt/ds41/roce-check.py
 LABEL local-inference.roce-dtype="v1" local-inference.roce-programs="v1"
 DOCKERFILE
 printf 'Built %s; update the fleet config image and distribute.\n' "$output"
