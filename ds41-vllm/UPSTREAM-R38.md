@@ -104,3 +104,33 @@ after the build. Fleet start runs four-node NCCL/RoCEnante correctness and CUDA
 replay checks, then serving smoke. These GPU/fleet checks have not run from this
 Windows workspace, so actual memory-capacity and throughput improvements remain
 unmeasured. Capture memory can partially offset the allocator-capacity gain.
+
+## Rust setuptools-scm artifact-tag build fix
+
+Checked upstream again 2026-09-14 13:55 UTC: JJ ab03e871 / b12x9e90d60f exist,
+but neither addresses the implicit Rust setuptools version-discovery failure.
+Pins remain unchanged for this build-only fix.
+
+Rust installation succeeds. tools/build_rust.py explicitly excludes wheel tags
+when deriving VLLM_RS_BUILD_VERSION, but its later setup() call triggers a second
+setuptools-scm discovery from pyproject.toml without that exclusion. A tag such
+as vllm-jovian-cu134-beta-<sha> is selected and cannot parse as a package version.
+
+build-image.sh now runs prepare-build-tags.py on its disposable .build clone.
+It verifies HEAD, backs up refs matching vllm-jovian-cu134-* and removes only
+those refs locally. Semantic-version tags, commit, source files and remote refs
+are unchanged. Repeated runs are idempotent. The helper refuses repositories
+outside this recipe's .build directory. Backups live outside the Docker context.
+
+To restore refs for debugging, run:
+
+```bash
+source versions.env
+python3 prepare-build-tags.py ".build/vllm-$VLLM_COMMIT" --commit "$VLLM_COMMIT" --restore
+```
+
+FILTER_ARTIFACT_TAGS=0 skips filtering on a later build. Restore first if the
+original tag-discovery behavior is desired. No CUDA/Rust code was patched.
+33 CPU tests pass, including a real temporary Git repository reproducing tag
+selection and checking filtering, normal-tag preservation, idempotence, rollback
+and unchanged HEAD/worktree. The ARM64 Docker build still must run on the Spark.

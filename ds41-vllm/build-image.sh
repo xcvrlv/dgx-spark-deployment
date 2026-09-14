@@ -13,6 +13,11 @@ if [[ ! -d "$src/.git" ]]; then
 fi
 [[ $(git -C "$src" rev-parse HEAD) == "$VLLM_COMMIT" ]]
 [[ -z $(git -C "$src" status --porcelain) ]] || { echo 'Build source is dirty' >&2; exit 1; }
+# setuptools-scm's implicit Rust setup pass does not honor the Python
+# get_version() exclusion. Keep non-version artifact tags out of this clone.
+if [[ ${FILTER_ARTIFACT_TAGS:-1} == 1 ]]; then
+  python3 "$here/prepare-build-tags.py" "$src" --commit "$VLLM_COMMIT"
+fi
 base="spark-vllm-ds41:jj-$VLLM_COMMIT-base"
 # Use JJ's complete build/dependency pipeline, including Rust and CUDA extensions.
 # The nightly path resolves one Torch/vision/audio set and shares it across stages.
