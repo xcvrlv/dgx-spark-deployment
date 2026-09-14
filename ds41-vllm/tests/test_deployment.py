@@ -25,7 +25,9 @@ spec.loader.exec_module(model_check)
 class RoceCheckTests(unittest.TestCase):
     def test_hca_comparison_accepts_sequence_types_but_preserves_order(self):
         tree = ast.parse((ROOT / 'roce-check.py').read_text())
-        check = next(node for node in tree.body if isinstance(node, ast.Assert)
+        # The comparison lives inside main(): spawned compiler workers
+        # re-import the module, so its body is guard-protected.
+        check = next(node for node in ast.walk(tree) if isinstance(node, ast.Assert)
                      and 'rt.hca_names' in ast.unparse(node.test))
         expression = compile(ast.Expression(check.test), '<hca-check>', 'eval')
         expected = ['rocep1s0f0', 'roceP2p1s0f0']

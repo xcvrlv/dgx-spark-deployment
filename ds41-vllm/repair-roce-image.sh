@@ -6,7 +6,7 @@ base="${BASE_IMAGE:-${IMAGE%-programs-v1}}"
 output="$IMAGE"
 # sha256 of the fixed roce-check.py; update it together with that file. The
 # guard makes a stale bake fail the build instead of shipping the old check.
-check_sha=fe2c95689c68ef29ddd8e2ddd30185548be2b84562534ebac83bb59284da9105
+check_sha=a1bc548efbbe7ab9adc612bf8fbde71bc794f86b59802ec1179d13c89931764d
 [[ $(uname -m) == aarch64 ]]
 mkdir -p "$here/.build"
 python3 "$here/check-upstream.py" --output "$here/.build/roce-dtype-upstream.json"

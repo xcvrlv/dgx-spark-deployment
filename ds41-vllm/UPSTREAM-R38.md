@@ -231,9 +231,12 @@ availability check polls.
 roce-check.py now creates its session with compile_workers=16, the same pool
 path serving uses. The pool is created only when a required artifact is
 missing, so a warm cache keeps the check fast; a cold cache compiles once and
-also warms the shared cache for the serving containers. repair-roce-image.sh
-now copies the fixed roce-check.py into the image, since the -dtype-v1 base
-still carries the old in-process check. 38 CPU tests pass; the added test
-walks the full compile_roce carrier dict (dtype keys plus gather) through the
-real metadata functions, which is the exact reported failure path. GPU
+also warms the shared cache for the serving containers. The check also guards
+its body with __main__: spawned compiler workers re-import the main module
+and CUDA is hidden from compiler children, so their re-import must not run
+the comparison. repair-roce-image.sh now copies the fixed roce-check.py into
+the image and verifies the baked copy against its sha, since the -dtype-v1
+base still carries the old in-process check. 38 CPU tests pass; the added
+test walks the full compile_roce carrier dict (dtype keys plus gather) and
+the check's full AST, which is the exact reported failure path. GPU
 qualification on the four Sparks is still required for correctness and replay.
