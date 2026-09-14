@@ -43,7 +43,7 @@ def measure(config, tokens, max_tokens):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', default=str(fleet.HERE / 'cluster-c16.json'))
+    parser.add_argument('--config', default=str(fleet.HERE / 'cluster-r38-c8.json'))
     parser.add_argument('--input-tokens', type=int, default=8192)
     parser.add_argument('--max-tokens', type=int, default=128)
     parser.add_argument('--concurrency', type=int, default=1)

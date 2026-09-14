@@ -1,24 +1,9 @@
-Current build/defaults: see [latest JJ update](UPSTREAM-R37.md). Older profiles and audit snapshots below are historical.
+# DeepSeek V4.1 Flash — JJ + b12x, four Sparks
 
-# DeepSeek V4.1 Flash â€” JJ + b12x, four Sparks
-
-**Current candidate: c16, 384K context, GPU utilization 0.88, new upstream pins
-and four audited RoCEnante ports.** See [OPTIMIZATIONS.md](OPTIMIZATIONS.md) for
-the build/migration commands, rollback switches and prefill A/B profiles.
-`fleet.py` defaults to `cluster-c16.json`; explicit older configs still work.
-The following sections retain the original c8 bring-up instructions as reference.
-
-Native ARM64 source build of local-inference-lab vLLM `dev/jovian-judgement`,
-with b12x, SM121 kernels and dual-rail RoCEnante. Independent of the preserved
-GLM images. `c8` means **eight concurrent sequences**.
-
-Defaults: TP4, one GPU per node, DCP1, **1,048,576-token native context cap**,
-4096-token prefill chunks, 0.80 GPU memory utilization, FP8 KV, native MXFP4
-experts and **original FP8 Engram on local SSD**. CUDA graphs and prefix caching
-are enabled. Target-only is the initial profile; optional DSpark is below.
-The context cap is a per-request limit, not a promise that eight simultaneous
-1M-token requests fit. No GPU-memory or cgroup limit is used to force a fit;
-startup must establish the available KV capacity on the fleet.
+Current recipe: **[R38 / latest JJ, max-seqs8](UPSTREAM-R38.md)**, 384K context,
+DSpark5, utilization0.85, OMP2, explicit256/128 KV pages and c1-c8 graph coverage.
+Run build-image.sh and configure-r38.py. fleet.py defaults to cluster-r38-c8.json.
+The older c16 and c8 profiles below are retained for historical comparisons.
 
 ## Build and run on Spark 1
 

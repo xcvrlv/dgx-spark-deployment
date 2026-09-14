@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Audited RoCEnante-only port of GLM v15/v16; compute overlays excluded.
-Upstream b12x 9043b448 was checked 2026-09-13. All four switches default off
+Rebased on b12x 3a8b879, checked 2026-09-14. Prepared-plan execution
+changes are retained; the local port only changes transport initialization/proxy. All four switches default off
 in code and are selected by the c16 communication recipe.
 """
 import argparse
@@ -8,8 +9,8 @@ import hashlib
 from pathlib import Path
 
 VERSION = 'ds41-roce-v1'
-INPUTS = {'comm/roce/_roce_proxy.c': 'a35f54cf75d6abf2427c5d144300647685816060348883d2cbf51d153efc5c70', 'comm/roce/roce_oneshot.py': '92a32ed7ad570f54228998da10dc8dd463a042458c2bbd6beec521d1668344d4'}
-OUTPUTS = {'comm/roce/_roce_proxy.c': 'b41e32ee56fb980bf8a5c75e855219665452a029b817643e4ace3bdf1717a6c1', 'comm/roce/roce_oneshot.py': '1eb29a73a3fc0d65b5598cc0520691f9e126c706183f88bc525aa48e2cd74b98'}
+INPUTS = {'comm/roce/_roce_proxy.c': 'a35f54cf75d6abf2427c5d144300647685816060348883d2cbf51d153efc5c70', 'comm/roce/roce_oneshot.py': 'c8a71b9a06eb4833d5eb64b1e11ad322699034c0b9b2fe45579c24d76f1b3ee3'}
+OUTPUTS = {'comm/roce/_roce_proxy.c': 'b41e32ee56fb980bf8a5c75e855219665452a029b817643e4ace3bdf1717a6c1', 'comm/roce/roce_oneshot.py': '65cc77211f3ad3f82a65dc29184fd27745ac3f35c9b717ab76240d7e4399083c'}
 
 def replace(text, old, new):
     if text.count(old) != 1:

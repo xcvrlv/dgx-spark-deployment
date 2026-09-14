@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import time
 import urllib.request
+import urllib.error
 
 import fleet
 
@@ -70,8 +71,20 @@ def main():
     base = f"http://{c['nodes'][0]['ip']}:{c['port']}"
     def http(path, post=False):
         req = urllib.request.Request(base + path, method='POST' if post else 'GET')
-        with urllib.request.urlopen(req, timeout=600) as r:
-            return r.read().decode()
+        try:
+            with urllib.request.urlopen(req, timeout=600) as r:
+                return r.read().decode()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors='replace')
+            if e.code == 404 and path in ('/start_profile', '/stop_profile'):
+                raise RuntimeError(
+                    f'{path} returned 404 at {base}. The running endpoint has no profiler route. '
+                    'Update fleet.py on the Spark and restart with torch_profile=true; '
+                    'verify docker inspect ds41-jj-0 contains --profiler-config. '
+                    'Editing the collector config does not change a running server. '
+                    f'Response: {body}'
+                ) from e
+            raise RuntimeError(f'{path}: HTTP {e.code}: {body}') from e
     def save(name, fn):
         try:
             value = fn()

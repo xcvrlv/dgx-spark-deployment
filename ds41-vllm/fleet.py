@@ -26,11 +26,13 @@ def load_config(path):
     assert len({n['host'] for n in c['nodes']}) == 4
     assert len({n['ip'] for n in c['nodes']}) == 4
     assert len(c['hcas']) == 2
+    assert type(c.get('graph_request_buckets', False)) is bool
     assert c['max_num_seqs'] in (8, 16), 'Supported profiles: c8 and c16'
     assert set(c.get('roce_optimizations', {})) <= set(ROCE_OPTIONS)
     assert all(type(v) is bool for v in c.get('roce_optimizations', {}).values())
     assert 0 < c['gpu_memory_utilization'] < 1
     assert 0 < c['max_model_len'] <= 1048576
+    assert type(c.get('omp_num_threads', 2)) is int and c.get('omp_num_threads', 2) > 0
     assert c['draft_tokens'] in (0, 1, 3, 5, 7)
     window = c.get('adaptive_speculative_tokens_window')
     initial = c.get('adaptive_speculative_tokens_initial')
@@ -76,6 +78,7 @@ def environment(c, rank):
     return {
         **{env: str(int(c.get('roce_optimizations', {}).get(key, False)))
            for key, env in ROCE_OPTIONS.items()},
+        'DS41_GRAPH_REQUEST_BUCKETS': str(int(c.get('graph_request_buckets', False))),
         'VLLM_HOST_IP': c['nodes'][rank]['ip'],
         'VLLM_WORKER_MULTIPROC_METHOD': 'spawn', 'VLLM_USE_V2_MODEL_RUNNER': '1',
         'VLLM_ENABLE_ROCE_ALLREDUCE': '1', 'VLLM_ENABLE_PCIE_ALLREDUCE': '0',
@@ -88,7 +91,7 @@ def environment(c, rank):
         'NCCL_MIN_NCHANNELS': '4', 'NCCL_MAX_NCHANNELS': '4',
         'NCCL_IGNORE_CPU_AFFINITY': '1',
         'CUTE_DSL_ARCH': 'sm_121a', 'TORCH_CUDA_ARCH_LIST': '12.1a',
-        'CUDA_DEVICE_MAX_CONNECTIONS': '32', 'OMP_NUM_THREADS': '8',
+        'CUDA_DEVICE_MAX_CONNECTIONS': '32', 'OMP_NUM_THREADS': str(c.get('omp_num_threads', 2)),
         'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True',
         'MALLOC_ARENA_MAX': '2', 'TOKENIZERS_PARALLELISM': 'false',
         'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1',
@@ -151,6 +154,8 @@ def serve_args(c, rank):
             **{key: c[key] for key in (
                 'adaptive_speculative_tokens_window', 'adaptive_speculative_tokens_initial'
             ) if c.get(key) is not None}})]
+    if c.get('swa_block_size') is not None:
+        cmd += ['--swa-block-size', str(c['swa_block_size'])]
     if c.get('torch_profile', False):
         cmd += ['--profiler-config', json.dumps({
             'profiler': 'torch', 'torch_profiler_dir': '/cache/profiles',
@@ -173,6 +178,9 @@ def preflight(c):
         script += shlex.join(['mkdir', '-p', c['cache_path']]) + '\n'
         script += shlex.join(['test', '-r', checkpoint_path(c, c['model_path']) + '/config.json']) + '\n'
         script += shlex.join(['docker', 'image', 'inspect', '--format', '{{.Os}}/{{.Architecture}}', c['image']]) + " | grep -qx linux/arm64\n"
+        if c.get('graph_request_buckets', False):
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.graph-requests"}}', c['image']]) + " | grep -qx ds41-graphs-v1\n"
         if any(c.get('roce_optimizations', {}).values()):
             script += shlex.join(['docker', 'image', 'inspect', '--format',
                                   '{{index .Config.Labels "local-inference.roce-overlay"}}', c['image']]) + " | grep -qx ds41-roce-v1\n"
@@ -268,7 +276,7 @@ def smoke(c):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', default=str(HERE / 'cluster-c16.json'))
+    parser.add_argument('--config', default=str(HERE / 'cluster-r38-c8.json'))
     parser.add_argument('action', choices=['plan', 'share', 'preflight', 'fabric', 'start', 'smoke', 'status', 'logs', 'stop'])
     parser.add_argument('--rank', type=int, choices=range(4), default=0)
     args = parser.parse_args()

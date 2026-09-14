@@ -84,3 +84,19 @@ Upstream checked 2026-09-13 20:38 UTC: heads advanced to JJ fa6ae921 and b12x
 135c9715. Pins remain JJ9342b1a/b12xfd3c638 as requested; these launch hooks use
 APIs verified in that existing image source. No upstream source patch added.
 CPU tests pass; the collector/profiler has not been exercised on the Spark fleet.
+
+## Profiler 404 and OMP default
+
+A 404 from /start_profile means that route is unavailable on the contacted
+server. In pinned JJ it is attached only when the server was launched with a
+non-null profiler. Verify the actual container arguments with docker inspect;
+a collector JSON containing torch_profile=true does not change the container.
+Copy updated fleet.py to the Spark, stop/start with the profile config, then
+confirm --profiler-config is present before tracing. Use a fresh output directory
+on retry: failed runs preserve diagnostic artifacts.
+
+OMP_NUM_THREADS now defaults to 2 following the operator's measured decode
+improvement; JSON omp_num_threads overrides it for comparisons. Existing
+containers need restart. The image and other launch limits are unchanged.
+Upstream rechecked 2026-09-13 20:57 UTC: JJ fa6ae921 / b12x 135c9715; pins retained
+for this existing-image diagnostic change. No upstream source patch is needed.

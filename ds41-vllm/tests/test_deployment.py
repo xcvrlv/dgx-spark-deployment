@@ -173,6 +173,57 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(counters[key]['bytes_per_second'], 200)
         self.assertTrue(counters['errors']['reset_or_wrap'])
 
+    def test_omp_default_and_operator_override(self):
+        c = copy.deepcopy(self.c)
+        c.pop('omp_num_threads', None)
+        self.assertEqual(fleet.environment(c, 0)['OMP_NUM_THREADS'], '2')
+        c['omp_num_threads'] = 1
+        self.assertEqual(fleet.environment(c, 0)['OMP_NUM_THREADS'], '1')
+
+    def test_graph_profile_preserves_operator_tuning_and_guards_image(self):
+        with tempfile.TemporaryDirectory() as d:
+            source, output = Path(d)/'source.json', Path(d)/'graphs.json'
+            c = copy.deepcopy(self.c)
+            c.update(draft_tokens=5, gpu_memory_utilization=0.85, omp_num_threads=1,
+                     max_num_batched_tokens=4092)
+            source.write_text(json.dumps(c))
+            with patch.object(sys, 'argv', ['configure-graphs.py', '--from-config', str(source), '--output', str(output)]):
+                runpy.run_path(str(ROOT/'configure-graphs.py'), run_name='__main__')
+            result = fleet.load_config(output)
+            self.assertEqual(result['max_num_seqs'],16)
+            self.assertTrue(result['graph_request_buckets'])
+            self.assertEqual(result['gpu_memory_utilization'],0.85)
+            self.assertEqual(result['omp_num_threads'],1)
+            self.assertEqual(result['max_num_batched_tokens'],4092)
+            self.assertEqual(result['draft_tokens'],5)
+            self.assertEqual(fleet.environment(result,0)['DS41_GRAPH_REQUEST_BUCKETS'],'1')
+            with patch.object(fleet, 'remote', return_value='sha256:same') as remote:
+                fleet.preflight(result)
+            self.assertTrue(all('local-inference.graph-requests' in call.args[2] for call in remote.call_args_list))
+
+    def test_r38_caps_c8_and_selects_cache_geometry(self):
+        c = fleet.load_config(ROOT / 'cluster-r38-c8.json')
+        args = fleet.serve_args(c, 0)
+        for flag, value in (('--max-num-seqs','8'), ('--max-model-len','393216'),
+                            ('--gpu-memory-utilization','0.85'), ('--block-size','256'),
+                            ('--swa-block-size','128')):
+            self.assertEqual(args[args.index(flag)+1], value)
+        graphs = json.loads(args[args.index('--compilation-config')+1])
+        self.assertEqual(graphs['cudagraph_capture_sizes'],list(range(1,49)))
+        self.assertEqual(c['draft_tokens'],5)
+        with tempfile.TemporaryDirectory() as d:
+            source, target = Path(d)/'old.json', Path(d)/'r38.json'
+            old = dict(self.c, model_path='/srv/original', omp_num_threads=1,
+                       adaptive_speculative_tokens_window=32)
+            source.write_text(json.dumps(old))
+            with patch.object(sys,'argv',['configure-r38.py','--from-config',str(source),'--output',str(target)]):
+                runpy.run_path(str(ROOT/'configure-r38.py'),run_name='__main__')
+            updated = fleet.load_config(target)
+            self.assertEqual(updated['model_path'],'/srv/original')
+            self.assertEqual(updated['omp_num_threads'],1)
+            self.assertEqual(updated['max_num_seqs'],8)
+            self.assertNotIn('adaptive_speculative_tokens_window',updated)
+
     def test_flat_checkpoint_used_by_serving_and_preflight(self):
         self.c['model_path'] = '/srv/DeepSeek-V4.1-Flash-MXFP4-FP4-Engram'
         self.c['model_subpath'] = '.'
