@@ -13,8 +13,9 @@ python3 "$here/check-upstream.py" --output "$here/.build/roce-dtype-upstream.jso
 [[ $(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$base") == linux/arm64 ]]
 docker build --platform linux/arm64 --build-arg BASE_IMAGE="$base" --build-arg CHECK_SHA="$check_sha" -t "$output" -f - "$here" <<'DOCKERFILE'
 ARG BASE_IMAGE
-ARG CHECK_SHA
 FROM ${BASE_IMAGE}
+# Stage-scoped ARG: a pre-FROM ARG is not visible to RUN.
+ARG CHECK_SHA
 COPY patches/roce_dtype.py patches/roce_programs.py /opt/ds41/patches/
 RUN python3 /opt/ds41/patches/roce_dtype.py /opt/b12x/b12x \
     && package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \
