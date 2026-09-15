@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Expose the DiskTable shard window the pinned vllm engram integration reads; checked against b12x 3a8b879 on 2026-09-15.
+"""Expose the DiskTable shard window the pinned vllm engram integration reads; checked against b12x 92cd380 (window unchanged since 3a8b879) on 2026-09-15.
 
 vllm's _ensure_disk_table reads table.shard_start/shard_end/shard_rows, which
 the b12x DiskTable keeps on self._cache (its own add_shard and require_complete
@@ -11,7 +11,7 @@ import hashlib
 from pathlib import Path
 
 RELATIVE = 'sequence/engram/_disk.py'
-SOURCE_SHA = 'cd01e2b1d69b3d59731f8cb847e09d577a8dda29144ab90752756d4b93bd5183'
+SOURCE_SHA = '08cbbe58f9d6dc9a52ba6c653a70e6110ecabc552515c23082a0226bb3914c08'
 OLD = b'''    @property
     def prefetch_pending(self) -> bool:
         """No disk reads remain pending between synchronous lookups."""

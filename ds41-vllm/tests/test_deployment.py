@@ -3,6 +3,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shlex
 import struct
@@ -62,6 +63,35 @@ class RoceCheckTests(unittest.TestCase):
         for requests, autotune in batches:
             self.assertEqual(len(requests), 1)
             self.assertIs(autotune, False)
+
+
+class CrossTreeContractTests(unittest.TestCase):
+    VLLM_SOURCE = Path(os.environ.get('DS41_VLLM_SOURCE', ROOT.parent/'tmp/jj-audit/local-inference-lab-vllm-5bca5a5/vllm'))
+    B12X_SOURCE = Path(os.environ.get('DS41_B12X_SOURCE', ROOT.parent/'tmp/jj-audit/local-inference-lab-b12x-92cd380/b12x'))
+
+    @unittest.skipUnless(VLLM_SOURCE.is_dir() and B12X_SOURCE.is_dir(), 'set DS41_VLLM_SOURCE and DS41_B12X_SOURCE to the pinned trees')
+    def test_vllm_wo_invocation_fields_are_b12x_known(self):
+        # The rebased vLLM WO declaration passes invocation fields the pinned
+        # b12x _query validates; an unknown field fails the fleet with
+        # "unknown WO invocation field" at the weights stage. The prefill plan
+        # must stay dynamic or live-row binding fails the exact-count gate.
+        attention = ast.parse((self.VLLM_SOURCE / 'models/deepseek_v4_1/attention.py').read_text())
+        prep = ast.parse((self.B12X_SOURCE / 'gemm/wo_projection/_preparation.py').read_text())
+        calls = [n for n in ast.walk(attention) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute) and n.func.attr == 'plan'
+                 and isinstance(n.func.value, ast.Name) and n.func.value.id == 'wo_projection']
+        self.assertEqual(len(calls), 1, 'expected one wo_projection.plan declaration')
+        invocation = next(kw for kw in calls[0].keywords if kw.arg == 'invocation')
+        self.assertEqual(invocation.value.func.id, 'dict')
+        keys = {k.arg for k in invocation.value.keywords}
+        self.assertTrue(keys, 'no WO invocation keys found')
+        self.assertIn('dynamic_tokens', keys, 'the prefill plan must stay dynamic')
+        query = next(n for n in ast.walk(prep) if isinstance(n, ast.FunctionDef) and n.name == '_query')
+        allowed_node = next(n for n in ast.walk(query) if isinstance(n, ast.Assign)
+                            and isinstance(n.targets[0], ast.Name) and n.targets[0].id == 'allowed')
+        expression = compile(ast.Expression(allowed_node.value), '<allowed>', 'eval')
+        allowed = eval(expression)
+        self.assertEqual(keys - allowed, set(), f'vLLM WO fields unknown to b12x: {sorted(keys - allowed)}')
 
 
 class ImageCheckTests(unittest.TestCase):

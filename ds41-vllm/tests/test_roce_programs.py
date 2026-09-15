@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('roce_programs_patch', ROOT/'patches/roce_programs.py')
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
-SOURCE = Path(os.environ.get('DS41_B12X_SOURCE', ROOT.parent/'tmp/jj-audit/local-inference-lab-b12x-3a8b879/b12x'))
+SOURCE = Path(os.environ.get('DS41_B12X_SOURCE', ROOT.parent/'tmp/jj-audit/local-inference-lab-b12x-92cd380/b12x'))
 
 @unittest.skipUnless(SOURCE.is_dir(), 'set DS41_B12X_SOURCE to pinned b12x package')
 class RoceProgramTests(unittest.TestCase):

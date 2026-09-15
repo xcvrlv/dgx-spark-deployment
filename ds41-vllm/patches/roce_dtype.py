@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fix RoCE preparation dtype names; checked against b12x9e90d60f on 2026-09-14."""
+"""Fix RoCE preparation dtype names; checked against b12x 92cd380 (target unchanged since 9e90d60f) on 2026-09-15."""
 import argparse
 import hashlib
 from pathlib import Path

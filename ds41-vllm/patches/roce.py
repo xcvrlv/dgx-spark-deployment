@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Audited RoCEnante-only port of GLM v15/v16; compute overlays excluded.
-Rebased on b12x 3a8b879, checked 2026-09-14. Prepared-plan execution
+Rebased on b12x 92cd380 (inputs unchanged since 3a8b879), checked 2026-09-14. Prepared-plan execution
 changes are retained; the local port only changes transport initialization/proxy. All four switches default off
 in code and are selected by the c16 communication recipe.
 """

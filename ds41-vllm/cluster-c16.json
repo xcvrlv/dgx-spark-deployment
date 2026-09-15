@@ -1,5 +1,5 @@
 {
-  "image": "spark-vllm-ds41:jj-5bca5a5-b12x-3a8b879-roce-v1-hashes-v1-sm121-dtype-v1-programs-v1-tuning-v3-engram-v1-collective-v1",
+  "image": "spark-vllm-ds41:jj-5bca5a5-b12x-92cd380-roce-v1-hashes-v1-sm121-dtype-v1-programs-v1-tuning-v3-engram-v1-collective-v1",
   "model_path": "/home/juho/.cache/huggingface/hub/DeepSeek-V4.1-Flash-MXFP4-FP4-Engram",
   "revision": "fb2764a5cf321eaa5070ca8f9e892818f477c16d",
   "cache_path": "/var/tmp/ds41-jj-cache",

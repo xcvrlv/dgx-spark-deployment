@@ -654,3 +654,66 @@ cluster-r38-c8.json opts out (fabric_check false); the retained c8/c16
 profiles and an absent key default to running the comparison. 47 CPU tests
 pass, including the gate: start skips with the key, and the standalone
 fabric action and an absent key still run the comparison.
+
+### Follow-up: the rebase needs the matching b12x (2026-09-15)
+
+**User-observed, on the first start after the rebase rebuild:** the fabric
+check was skipped (`fabric_check` false) and the weights stage loaded the
+model, but b12x weights-stage preparation then failed with
+`ValueError: unknown WO invocation field` from
+`b12x/gemm/wo_projection/_preparation.py _query` — reached through the
+rebased vLLM's new WO projection declaration (`attention.py
+_wo_preparation_unit` -> `_wo_plan`), which now passes
+`dynamic_tokens=is_prefill` in the invocation.
+
+**Root cause (source-verified):** the vLLM head (5bca5a5) pairs with a newer
+b12x. The pinned b12x (3a8b879) allows only `{operation, heads_per_group,
+nope_dim, rope_dim, return_3d, positions_dtype, cos_sin_dtype}` in a WO
+invocation, so the new `dynamic_tokens` field fails the declaration outright;
+and merely accepting it would not be enough — the pinned b12x
+`_require_exact_tokens` forbids binding any count other than the prepared
+one, while the rebased serving path binds the prefill plan with live rows.
+The pinned vLLM (c9dc4e5) has no `_wo_plan` at all: the head added the WO
+projection declaration, which pairs with a newer b12x.
+
+**Pin update:** versions.env advances B12X_COMMIT to
+92cd3800932539c947c9a8e06123fe5f36c9eae4 (upstream head, "Merge pull request
+#375 ... fix/mxfp8-scale-bounds-prepared"; fresh check 2026-09-15), matching
+the upstream pairing at the vLLM head; the image tag becomes
+jj-5bca5a5-b12x-92cd380-... in all three recipes. The head implements dynamic
+tokens end to end: the invocation field, the query field, the fused-b skip
+for dynamic plans, and `_check_tokens` (any live count up to capacity for
+dynamic plans, exact count otherwise); `run_inv_rope` executes with the live
+token count.
+
+**Patch targets re-audited at 92cd380 (blob identities):** every
+RoCE-relevant target is byte-identical to the previously pinned copy —
+`comm/roce/_preparation.py` (dtype), `comm/roce/_oneshot_cute.py` and
+`_allgather_cute.py` (programs), `comm/roce/_roce_proxy.c` and
+`roce_oneshot.py` (the audited port, so `API_VERSION = 1` is unchanged) — so
+those patches apply unchanged. `sequence/engram/_disk.py` changed
+(cd01e2b1... -> 08cbbe58...): upstream still keeps the shard window on the
+DiskRowCache without exposing the properties, so the disk-Engram patch
+remains necessary and applies with its SOURCE_SHA rebased (the exact
+`prefetch_pending` anchor survives).
+
+**Contract surfaces survive at 92cd380:** `from b12x.preparation import
+PreparationSession` (session.py moved into the preparation package),
+`configure_tuning_shard`, the `B12X_AUTOTUNE` gate, `CollectiveRequirement`
+exports, `WOProjectionScratchCaps.scratch_specs`, and the
+`bind_inv_rope`/`run_inv_rope` kwargs contract are present; the vLLM wheel
+depends on no removed b12x surface.
+
+**Rebuild cost:** the expensive vLLM CUDA compile lives in the JJ base image
+(`FROM ${JJ_IMAGE}`), so the b12x pin bump invalidates only the b12x wheel
+build and the patch/label layers — the rebuild reuses the cached vLLM compile
+layers and is fast.
+
+A cross-tree contract gate now guards this failure shape: the vLLM
+`wo_projection.plan` invocation keys must be a subset of the pinned b12x
+`_query` allowed set, and `dynamic_tokens` must stay in the invocation, so
+future field drift fails the suite instead of the fleet. 48 CPU tests pass
+against the new trees. GPU qualification on the four Sparks is still
+required: the matched rebase must establish that the weights-stage WO
+declaration passes, profile_run sees prepared V4.1 attention metadata, and
+the four ranks prime the RoCE collective in the same round.

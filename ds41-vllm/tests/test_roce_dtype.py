@@ -14,7 +14,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('roce_dtype_patch',ROOT/'patches/roce_dtype.py')
 p=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
-SOURCE=Path(os.environ.get('DS41_B12X_SOURCE',ROOT.parent/'tmp/jj-audit/local-inference-lab-b12x-3a8b879/b12x'))
+SOURCE=Path(os.environ.get('DS41_B12X_SOURCE',ROOT.parent/'tmp/jj-audit/local-inference-lab-b12x-92cd380/b12x'))
 
 class Dtype(Enum):
     float16=1
