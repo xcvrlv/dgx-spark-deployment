@@ -18,7 +18,7 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 # Stage-scoped ARG: a pre-FROM ARG is not visible to RUN.
 ARG CHECK_SHA
-COPY patches/roce_dtype.py patches/roce_programs.py patches/b12x_tuning.py patches/engram_disk.py /opt/ds41/patches/
+COPY patches/roce_dtype.py patches/roce_programs.py patches/b12x_tuning.py patches/engram_disk.py patches/roce_collective.py /opt/ds41/patches/
 RUN python3 /opt/ds41/patches/roce_dtype.py /opt/b12x/b12x \
     && package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \
     && python3 /opt/ds41/patches/roce_dtype.py "$package" \
@@ -31,9 +31,11 @@ RUN python3 /opt/ds41/patches/roce_dtype.py /opt/b12x/b12x \
     && python3 /opt/ds41/patches/engram_disk.py "$package" --check \
     && vllm_package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")" \
     && python3 /opt/ds41/patches/b12x_tuning.py "$vllm_package" \
-    && python3 /opt/ds41/patches/b12x_tuning.py "$vllm_package" --check
+    && python3 /opt/ds41/patches/b12x_tuning.py "$vllm_package" --check \
+    && python3 /opt/ds41/patches/roce_collective.py "$vllm_package" \
+    && python3 /opt/ds41/patches/roce_collective.py "$vllm_package" --check
 COPY roce-check.py /opt/ds41/roce-check.py
 RUN python3 -c "import hashlib,sys; digest=hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest(); assert digest==sys.argv[2], f'stale roce-check baked into image: {digest}; copy the updated roce-check.py and rebuild'" /opt/ds41/roce-check.py "$CHECK_SHA"
-LABEL local-inference.roce-dtype="v1" local-inference.roce-programs="v1" local-inference.b12x-tuning="v1" local-inference.engram-disk="v1"
+LABEL local-inference.roce-dtype="v1" local-inference.roce-programs="v1" local-inference.b12x-tuning="v1" local-inference.engram-disk="v1" local-inference.roce-collective="v1"
 DOCKERFILE
 printf 'Built %s; update the fleet config image and distribute.\n' "$output"

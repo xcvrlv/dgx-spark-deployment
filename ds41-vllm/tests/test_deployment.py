@@ -252,6 +252,23 @@ class FleetTests(unittest.TestCase):
             fleet.preflight(c)
         self.assertFalse(any('local-inference.b12x-tuning' in call.args[2] for call in remote.call_args_list))
 
+    def test_preflight_guards_roce_collective_label(self):
+        # The RoCE prepare call primes a real four-rank exchange, so every
+        # serving image must carry the coordinating patch label.
+        with patch.object(fleet, 'remote', return_value='sha256:same') as remote:
+            fleet.preflight(self.c)
+        self.assertTrue(all('local-inference.roce-collective' in call.args[2] for call in remote.call_args_list))
+
+    def test_cluster_configs_match_versions_env_image(self):
+        # A stale image field serves an image without the latest fixes; the
+        # distributed tag must resolve to exactly the pinned IMAGE string.
+        image = dict(
+            line.split('=', 1) for line in (ROOT/'versions.env').read_text().splitlines()
+            if line.startswith('IMAGE=')
+        )['IMAGE']
+        for name in ('cluster-c8.json', 'cluster-c16.json', 'cluster-r38-c8.json'):
+            self.assertEqual(fleet.load_config(ROOT / name)['image'], image, name)
+
     def test_checkpoint_subpath_cannot_escape_mount(self):
         for subpath in ('../outside', '/outside'):
             self.c['model_subpath'] = subpath

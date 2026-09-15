@@ -454,3 +454,63 @@ for every profile, the migration stripping the dead key, and the preflight
 label gates with rollback. GPU qualification on the four Sparks is still
 required to establish collective correctness, replay, and the actual fleet
 gain.
+
+## RoCE collective priming coordination (2026-09-15)
+
+**User-observed, after the retirement rebuild:** the sparse ladder works — the
+weights stage collapsed to 5720 requests (from 31454) and model priming
+completed in 0:58 — but startup then failed with
+`RuntimeError: b12x preparation failed on rank 1: RuntimeError:
+distributed.roce.0-1-2-3.collectives failed to prepare with configuration
+BackendConfig(backend='native') (fixed): RoCE collective on rank 1 timed out
+waiting for rank 0, HCA 0, at sequence 1; the runtime is poisoned (its epoch
+stopped at 0, later launches do nothing) and rank data is no longer
+trustworthy`. The failure is the fail-stop timeout in
+`b12x/comm/roce/roce_oneshot.py check_health` (the kernel's spin limit wrote
+failed_seq=1, peer=0, hca=0 into the pinned ctrl region), not a transport or
+setup problem.
+
+**Root cause (source-verified):** the RoCE adapter declares its weights-stage
+request (`vllm/distributed/device_communicators/b12x_roce_all_reduce.py
+get_b12x_preparation_units`) with only `prepare_call=prepare` — no
+`collective=CollectiveRequirement(...)`, unlike the PCIe adapter which
+declares one. `PreparationJob._run` yields the world-coordination requirement
+only for requests that declare a collective, so the RoCE priming — which
+primes a real four-rank all-reduce and all-gather
+(`b12x/comm/roce/_preparation.py prepared_call` -> `state.all_reduce`) — ran
+uncoordinated whenever a rank reached the request. Rank skew near the end of
+the weights batch (rank 1 about 14 requests ahead of rank 0, drifted by the
+per-rank 0.05s `pool.wait_for_progress` waits) left rank 1's first launch
+waiting for rank 0 until the kernel spin limit timed out and poisoned the
+runtime.
+
+**Fix:** `patches/roce_collective.py` (hash-guarded against the pinned vLLM
+source, independent `--revert` switch) declares
+`collective=CollectiveRequirement(key=self._request_name(),
+ranks=tuple(sorted(self.global_ranks)))` on the RoCE request and sets the
+unit's `autotune=False` (a real collective cannot be raced per rank, and
+`PreparationJob._run` raises for collective declarations in tuned batches).
+The coordinator then authorizes the collective only when every participant
+rank reported ready (`_authorize_ready`), so all ranks prime in the same
+advance round. With the current recipe (`b12x_autotune: false`) the request
+already landed in the defaults batch, so the fix is a pure correctness change
+there.
+
+**Checked revisions (check-upstream.py, 2026-09-15):** vllm pin c9dc4e5,
+upstream head 5bca5a5 — different, and the upstream head still carries the
+missing declaration, so upstream does not supersede this fix. b12x pin
+3a8b879, upstream head 92cd380 — different; the pinned b12x
+`_preparation.py` is byte-identical to the audited copy
+(`roce-preparation-latest.py`), so the b12x side is current as pinned.
+
+**Deployment wiring:** the main Dockerfile applies the patch to the installed
+vLLM wheel with `LABEL local-inference.roce-collective="v1"`; the preflight
+greps that label unconditionally (RoCEnante is always enabled on this fleet);
+the image tag gains -collective-v1 in versions.env and all three recipes; the
+repair script also bakes the patch so a repaired image carries it too.
+
+44 CPU tests pass, including the patch gates (reapplication, rollback, drift
+fail-closed, the world-coordination declaration), the preflight label guard,
+and the versions.env/recipe image-tag consistency gate. GPU qualification on
+the four Sparks is still required: the fix must establish that the four ranks
+prime the RoCE collective in the same round without the sequence-1 timeout.

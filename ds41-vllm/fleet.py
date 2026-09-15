@@ -199,6 +199,8 @@ def preflight(c):
                                   '{{index .Config.Labels "local-inference.b12x-tuning"}}', c['image']]) + " | grep -qx v1\n"
         script += shlex.join(['docker', 'image', 'inspect', '--format',
                               '{{index .Config.Labels "local-inference.engram-disk"}}', c['image']]) + " | grep -qx v1\n"
+        script += shlex.join(['docker', 'image', 'inspect', '--format',
+                              '{{index .Config.Labels "local-inference.roce-collective"}}', c['image']]) + " | grep -qx v1\n"
         script += f"fstype=$(findmnt -n -o FSTYPE -T {shlex.quote(c['model_path'])})\n"
         script += 'case "$fstype" in ext4|xfs|btrfs) ;; *) echo "Model must be local SSD storage, got $fstype"; exit 1;; esac\n'
         for hca in c['hcas']:

@@ -50,6 +50,14 @@ RUN python3 /opt/ds41/patches/engram_disk.py /opt/b12x/b12x \
     && python3 /opt/ds41/patches/b12x_tuning.py "$vllm_package" --check
 LABEL local-inference.b12x-tuning="v1" local-inference.engram-disk="v1"
 
+# World-coordinate the RoCE collective priming in the installed wheel: the
+# prepare call primes a real four-rank exchange, so the request must declare
+# its collective requirement and cannot be raced per rank.
+RUN vllm_package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")" \
+    && python3 /opt/ds41/patches/roce_collective.py "$vllm_package" \
+    && python3 /opt/ds41/patches/roce_collective.py "$vllm_package" --check
+LABEL local-inference.roce-collective="v1"
+
 # Apply only the audited communication port to source and installed wheel.
 RUN python3 /opt/ds41/patches/roce.py /opt/b12x/b12x \
     && package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \
