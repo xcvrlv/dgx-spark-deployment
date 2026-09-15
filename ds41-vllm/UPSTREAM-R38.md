@@ -514,3 +514,31 @@ fail-closed, the world-coordination declaration), the preflight label guard,
 and the versions.env/recipe image-tag consistency gate. GPU qualification on
 the four Sparks is still required: the fix must establish that the four ranks
 prime the RoCE collective in the same round without the sequence-1 timeout.
+
+### Follow-up: the fabric check needed the coordinator too (2026-09-15)
+
+**User-observed, on the first start after the coordination rebuild:** the
+preflight passed (the new label gate works) and RoCEnante initialized, but the
+fabric qualification failed with `ValueError: collective preparation requires
+a coordinator` from `roce-check.py:39` -> b12x `session.py:317`. The
+declaration is doing its job: `session.prepare()` without a coordinator
+correctly refuses collective-declaring requests, and the check script called
+it uncoordinated — the same latent manifestation the fix removed from
+`prepare_b12x_locally`, in the standalone fabric path instead.
+
+**Fix:** `roce-check.py` now drives its preparation through the same
+`B12xPreparationCoordinator` machinery serving uses (imported from
+`vllm.v1.worker.b12x_startup`), wrapped in a small gloo exchange shim that
+exposes `.ranks` and `.tcp_store_group.all_gather_obj` over the script's 180s
+gloo group. This reuses the tested all-participant readiness gate and the
+keep-every-rank-in-the-exchange completion rule — a done job keeps advancing
+safely, so rank drift in the compile/drain steps cannot strand the exchange
+and the comparison loop starts on all ranks together. `PreparationResult.
+close()` releases only retained benchmark trials, so the published RoCE plan
+stays installed for the comparison. The repair script's stale-bake guard
+`check_sha` is updated together with the file.
+
+45 CPU tests pass, including the AST gate asserting the check uses the world
+coordinator (no uncoordinated `session.prepare(`) and asserts on the
+coordinator's error outcome. GPU qualification on the four Sparks is still
+required.

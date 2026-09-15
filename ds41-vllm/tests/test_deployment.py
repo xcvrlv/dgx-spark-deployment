@@ -37,6 +37,16 @@ class RoceCheckTests(unittest.TestCase):
                      'os': SimpleNamespace(environ={'B12X_ROCE_HCA': ','.join(expected)})}
             self.assertEqual(eval(expression, scope), passes)
 
+    def test_preparation_uses_the_world_coordinator(self):
+        # The RoCE request declares a collective, so session.prepare() without
+        # a coordinator raises "collective preparation requires a coordinator";
+        # the check must qualify the serving path's coordinated rounds instead.
+        tree = ast.parse((ROOT / 'roce-check.py').read_text())
+        unparsed = ast.unparse(tree)
+        self.assertNotIn('session.prepare(', unparsed)
+        self.assertIn('B12xPreparationCoordinator', unparsed)
+        self.assertIn("outcome['error'] is None", unparsed)
+
 
 class ImageCheckTests(unittest.TestCase):
     def test_build_check_does_not_import_driver_dependent_vllm(self):

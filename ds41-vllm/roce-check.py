@@ -36,7 +36,34 @@ def main():
     # programs, and a cold shared compile cache then fails closed as unavailable.
     session = PreparationSession(device=torch.device('cuda', 0), autotune=False,
                                  compile_workers=16)
-    session.prepare(tuple(request for unit in units for request in unit.requests))
+    # The RoCE request declares a collective, so priming needs the same
+    # world-coordinated rounds as serving: the coordinator authorizes it only
+    # when every participant rank reported ready, and every rank stays in the
+    # exchange until all jobs are done (a done job keeps advancing safely, so
+    # rank drift in the compile/drain steps cannot strand the exchange).
+    from types import SimpleNamespace
+    from vllm.v1.worker.b12x_startup import B12xPreparationCoordinator
+
+    def exchange(group):
+        def all_gather_obj(payload):
+            gathered = [None] * dist.get_world_size()
+            dist.all_gather_object(gathered, payload, group=group)
+            return gathered
+
+        return SimpleNamespace(
+            ranks=tuple(range(dist.get_world_size())),
+            tcp_store_group=SimpleNamespace(all_gather_obj=all_gather_obj),
+        )
+
+    coordinator = B12xPreparationCoordinator(
+        session,
+        [tuple(request for unit in units for request in unit.requests)],
+        global_rank=rank, world_group=exchange(dist.group.WORLD),
+    )
+    outcome = coordinator.status()
+    while not outcome['done']:
+        outcome = coordinator.advance()
+        assert outcome['error'] is None, f'preparation failed: {outcome["error"]}'
     plan = adapter._prepared_plan()
     before = rt.stats()['bytes_posted_per_hca']
     for dtype in (torch.bfloat16, torch.float16, torch.float32):
