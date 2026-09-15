@@ -1,6 +1,12 @@
-# Exact c1-c8 graph coverage with a c16 scheduler
+# Exact c1-c8 graph coverage with a c16 scheduler — RETIRED 2026-09-15
 
-This candidate fixes graph shape coverage, not a proven throughput result.
+This experiment is retired: the DS41 request-bucket patch, its child image
+builder, its launcher activation variable and its config key were removed
+after the state-stage coverage OOM (see UPSTREAM-R38.md). The machinery
+described below no longer exists in the recipe; this document is retained as
+the decision record. The capture ladder is the sparse spread in fleet.py.
+
+This candidate fixed graph shape coverage, not a proven throughput result.
 Keep the operator's existing k5, OMP, memory utilization0.85 and prefill batch
 settings for the comparison. No full JJ/b12x compilation is required: build a
 small child image on top of the installed pinned image.

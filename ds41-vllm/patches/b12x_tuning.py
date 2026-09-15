@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Reduce serving tuning budget: rounds=1, samples=4, race_batch=8, race_budget=4GiB; checked against vllm c9dc4e5 on 2026-09-15.
+"""Reduce serving tuning budget: compile_workers=8, rounds=1, samples=4, race_batch=8, race_budget=4GiB; checked against vllm c9dc4e5 on 2026-09-15.
 
+compile_workers=8 halves the compile pool's anonymous host RAM peak (the
+compile processes are the main MemAvailable consumer during compilation);
 race_budget caps the resident candidate memory per race batch (b12x default is
 half of free GPU memory); race_batch bounds candidates per batch (default 32).
 """
@@ -11,8 +13,11 @@ from pathlib import Path
 RELATIVE = 'model_executor/warmup/b12x_prepare.py'
 SOURCE_SHA = '2213eb87da148aba3508547dcb25585b69b2d6d28da211befa0bc9c5487eecaf'
 OLD = b'        compile_workers=16,\n    )'
-NEW = b'        compile_workers=16,\n        rounds=1, samples=4, race_batch=8, race_budget=4 * (1 << 30),\n    )'
-PRIOR = (b'        compile_workers=16,\n        rounds=1, samples=4,\n    )',)
+NEW = b'        compile_workers=8,\n        rounds=1, samples=4, race_batch=8, race_budget=4 * (1 << 30),\n    )'
+PRIOR = (
+    b'        compile_workers=16,\n        rounds=1, samples=4, race_batch=8, race_budget=4 * (1 << 30),\n    )',
+    b'        compile_workers=16,\n        rounds=1, samples=4,\n    )',
+)
 
 
 def patch(root, *, check=False, revert=False):

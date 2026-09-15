@@ -8,7 +8,7 @@ import fleet
 HERE = Path(__file__).resolve().parent
 
 
-def configure(source, output, draft_tokens=5, graph_coverage=False):
+def configure(source, output, draft_tokens=5):
     source, output = Path(source), Path(output)
     if source.resolve() == output.resolve():
         raise ValueError('Use a separate output filename to preserve the old recipe')
@@ -19,7 +19,7 @@ def configure(source, output, draft_tokens=5, graph_coverage=False):
                 'b12x_autotune', 'reduced_tuning'):
         c[key] = defaults[key]
     c['draft_tokens'] = draft_tokens
-    c['graph_request_buckets'] = graph_coverage
+    c.pop('graph_request_buckets', None)
     c.setdefault('omp_num_threads', 2)
     for key in ('adaptive_speculative_tokens_window', 'adaptive_speculative_tokens_initial'):
         c.pop(key, None)
@@ -36,7 +36,5 @@ if __name__ == '__main__':
     p.add_argument('--from-config', default=str(HERE / 'cluster-r38-c8.json'))
     p.add_argument('--output', default=str(HERE / '.build/cluster-r38-c8.json'))
     p.add_argument('--draft-tokens', type=int, choices=(0,1,3,5,7), default=5)
-    p.add_argument('--graph-coverage', action='store_true', help='Opt into extra exact request buckets')
-    p.add_argument('--no-graph-coverage', action='store_true')
     a = p.parse_args()
-    configure(a.from_config, a.output, a.draft_tokens, a.graph_coverage and not a.no_graph_coverage)
+    configure(a.from_config, a.output, a.draft_tokens)

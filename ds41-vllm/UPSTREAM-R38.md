@@ -21,7 +21,7 @@ versions.env. The Docker build retains JJ's full build process and SM121 target.
 | Prefill batch | 4096 |
 | OMP threads | 2; explicit operator override preserved |
 | Main / SWA pages | 256 / 128 tokens |
-| Graph token capture sizes | Powers of two plus the cap: 1,2,4,8,16,32,48 |
+| Graph token capture sizes | Minimal base plus the cap: 1,2,8,48 |
 | Extra exact request coverage | Every concurrency1..8 |
 | Adaptive verification | On; latest upstream cost/metric fixes |
 | Acceptance-history depth adaptation | Off in the new baseline |
@@ -60,14 +60,11 @@ Preparation is serial in this short diagnostic process; serving uses JJ's own
 startup coordinator. The plan remains alive until the probes finish.
 
 Graph-policy enumeration is unchanged upstream. The local exact c1-c8 patch
-therefore still applies after guarding the new file hash (only the upstream
-memory-profile preparation callback changed). It is applied in the main image;
-no graph child image is needed. At c8/k5, FULL shapes are188 instead of58.
-All legal mixed verification totals at each request count are covered. This
-costs more graph objects and startup time; the profiler includes them when
-budgeting KV memory. The new upstream pricing follows these same shapes.
-Set graph_request_buckets=false and restart to compare upstream-only coverage
-on the same image. Old configs without swa_block_size can also compare geometry,
+was retired on 2026-09-15 (see the state-stage OOM section below): it is no
+longer applied, the graph child image builder and the launcher gate are gone,
+and baked images keep the patch dormant because the launcher never sets its
+activation variable. The capture ladder below is the sparse spread, not the
+full ladder. Old configs without swa_block_size can also compare geometry,
 but use explicit32 for a true old-layout comparison on the new upstream.
 
 ## Build and launch on the Spark
@@ -90,9 +87,9 @@ python3 fleet.py --config .build/cluster-r38-c8.json start
 ```
 
 Use --draft-tokens0 for target-only or7 for a separate experiment (graph token
-cap becomes64 at c8/k7). Old c16 JSON profiles are retained, but are not the
-current launch default. The new main image carries graph patch label
-local-inference.graph-requests=ds41-graphs-v1 for fail-closed launcher preflight.
+cap becomes64 at c8/k7). Old c16 and c8 JSON profiles are retained, but are not
+the current launch default; they now carry the R38 image tag so every profile
+runs the same upstream revision.
 
 ## Validation
 
@@ -273,14 +270,17 @@ volume. Decode batches pad to the nearest captured size, which coarsens
 mid-batch padding: 3-7 request decode batches pad to the 8-request cap; the
 smoke concurrency of 8 still hits the cap exactly.
 
-Second, patches/b12x_tuning.py reduces the serving tuning budget and bounds
-its resident memory: get_b12x_session passed only autotune and
-compile_workers, while PreparationSession defaults to SURVIVOR_ROUNDS=3
-rounds with 8 timed samples per candidate per round, race_batch=32 resident
-candidates per batch, and race_budget = half of free GPU memory. The patch
-passes rounds=1, samples=4, race_batch=8, race_budget=4GiB, cutting timed GPU
-work about 6x per candidate and capping resident candidate memory per race
-batch instead of letting it reach half the device. b12x's own recorded race
+Second, patches/b12x_tuning.py reduces the serving tuning budget, bounds its
+resident memory, and halves the compile pool's anonymous host RAM peak:
+get_b12x_session passed only autotune and compile_workers, while
+PreparationSession defaults to SURVIVOR_ROUNDS=3 rounds with 8 timed samples
+per candidate per round, race_batch=32 resident candidates per batch, and
+race_budget = half of free GPU memory. The patch passes compile_workers=8,
+rounds=1, samples=4, race_batch=8, race_budget=4GiB, cutting timed GPU work
+about 6x per candidate, capping resident candidate memory per race batch, and
+halving the host-side compile pool (64 to 32 processes fleet-wide, 16 to 8 per
+node) whose anonymous compilation buffers are the main MemAvailable consumer
+during compilation. b12x's own recorded race
 evidence (preparation/_measurement.py): round-to-round spread stays under 4%
 and the eventual winner never trailed the first round's leader by more than
 0.2%, so the extra rounds almost never change the outcome, and the
@@ -368,14 +368,86 @@ switch, so there is no local source workaround for upstream to supersede.
 
 The launcher now defaults missing b12x_autotune to false. configure-r38.py
 explicitly copies that default even when its input enabled tuning. The c8 recipe
-opts out of the extra request-bucket experiment and reduced-tuning label gate;
-it restores the full earlier token-size ladder (1..48 at k5). R38 cache geometry,
-384Ki context, c8/k5, 0.85 memory utilization and OMP2 remain. Cached/default
-kernel preparation and graph capture still run; this removes candidate racing,
-not all startup allocations. It is not a guarantee against every possible OOM.
+opts out of the reduced-tuning label gate; the extra request-bucket experiment
+was retired on 2026-09-15 (see the section below), and the capture ladder is
+the sparse spread (1,2,8 plus the cap: 1,2,8,48 at k5), not the full ladder.
+R38 cache geometry, 384Ki context, c8/k5, 0.85 memory utilization and OMP2
+remain. Cached/default kernel preparation and graph capture still run; this
+removes candidate racing and the bucket coverage explosion, not all startup
+allocations. It is not a guarantee against every possible OOM.
 
 Existing repaired R38 images need no rebuild. Copy fleet.py, then update the
-operator config to b12x_autotune=false, graph_request_buckets=false,
-reduced_tuning=false, max_num_seqs=8, draft_tokens=5. Keep its existing image,
-checkpoint path and cache path; stop and start the fleet. Extra request buckets
-can be explicitly enabled with configure-r38.py --graph-coverage.
+operator config to b12x_autotune=false, reduced_tuning=false, max_num_seqs=8,
+draft_tokens=5, and remove the dead graph_request_buckets key. Keep its
+existing image, checkpoint path and cache path; stop and start the fleet.
+
+## State-stage coverage OOM root cause and graph patch retirement (2026-09-15)
+
+The pasted startup log ("b12x priming gemm.block_fp8_linear: 28121/31454
+ready, 0 measured, 0 cached, 12 compilations") died with exit code None (the
+unified-memory OOM killer; a CUDA OutOfMemoryError would exit 1 with a
+traceback) at ~89% of a 31454-request prepare() call. Source-level audit
+against the pinned trees (JJ c9dc4e5, b12x 3a8b879) establishes:
+
+- b12x preparation runs at two lifecycle points: the weights stage (after
+  model load, before memory profiling) and the state stage (after the KV and
+  state pools exist, before graph capture). The compile pool is created
+  lazily and closed at the end of every job, so each stage spawns fresh
+  compiler workers whose torch imports produce the warnings seen ~9s before
+  the first progress line.
+- The DS41 request-bucket capture descriptors (num_tokens from N to N*6 for
+  N=1..8, union {1..48}) feed CudaGraphManager.planned_token_counts(), which
+  the state stage consumes through _planned_decode_counts. With the sparse
+  ladder {1,2,8,48} the state stage therefore declared 50 exact token counts
+  instead of the 8 the weights stage saw, breaking the documented invariant
+  that both stages declare the same counts (b12x_prepare.py lines 74-79).
+  Each added count re-declared and re-compiled every weight-only family per
+  layer (norm.mhc three operations per count, moe.decode, gemm.bf16_gemv
+  two dtypes per count, vocabulary projection) on top of the state-own
+  attention/indexer declarations: an estimated 27k-31k requests, matching
+  the observed 31454. The weights stage (8 counts, roughly 4k-6k requests)
+  had already completed and fit before the paste window.
+- Priming resources persist for the plan lifetime (the owners inside the
+  prepared payload are cleared only on release), so volume accumulates
+  across thousands of requests while the 16 compile workers per rank compete
+  for the same 121.7 GiB unified pool as the GPU. Host RAM is GPU memory on
+  a Spark.
+- The full 1..48 ladder re-introduces the same explosion through the ordinary
+  enumeration: both stages then declare 50 counts (roughly six times the
+  sparse-spread volume), so the conservative c8 startup that restored the
+  full ladder while disabling the bucket patch did not fix the OOM.
+
+Fixes (launcher-side except the patch removal; no vLLM kernel recompile):
+
+1. The DS41 request-bucket patch is retired: patches/graph_requests.py, the
+   graph child image builder, configure-graphs.py, the launcher activation
+   variable DS41_GRAPH_REQUEST_BUCKETS, the graph_request_buckets config key
+   and its preflight gate are removed. Baked images keep the patch dormant
+   (its own code defaults the variable to "0"), so removal is fail-closed.
+   The image tag drops -graphs-v1; the rebuild reuses the cached compile
+   layers, so bash build-image.sh after copying the recipe is fast. Existing
+   repaired R38 images also work under their old tag because the launcher
+   never sets the activation variable.
+2. serve_args restores the sparse capture spread: minimal base plus the cap,
+   {1,2,8,48} at c8/k5. Both preparation stages then declare the same 8
+   counts, the state-stage volume collapses back to the weights-stage scale
+   that fits, and graph capture drops from 48+ graphs to 4. Decode batches
+   pad up to the nearest captured size: 3-7 request batches pad to the
+   8-request cap and the smoke concurrency of 8 still hits the cap exactly.
+3. The tuning-v3 bake (compile_workers=8, rounds=1, samples=4, race_batch=8,
+   race_budget=4GiB) is kept: compile_workers=8 halves the compile pool's
+   anonymous host RAM peak, the main MemAvailable consumer during
+   compilation.
+
+The earlier c16 and c8 recipes now carry the R38 image tag: every profile
+runs the same upstream revision, and with the sparse ladder their
+preparation volumes stay small. The c16 profile keeps its historical 0.88
+utilization, 16 sequences and draft 7; its KV-capacity fit at 0.88 on this
+upstream is an unmeasured trial. A startup allocation failure there is a
+failed capacity trial, not a reason to weaken checks.
+
+42 CPU tests pass after the retirement, including the minimal capture lists
+for every profile, the migration stripping the dead key, and the preflight
+label gates with rollback. GPU qualification on the four Sparks is still
+required to establish collective correctness, replay, and the actual fleet
+gain.

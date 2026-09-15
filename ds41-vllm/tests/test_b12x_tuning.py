@@ -24,6 +24,7 @@ class B12xTuningPatchTests(unittest.TestCase):
             p.patch(root)
             p.patch(root, check=True)
             patched = dest.read_bytes()
+            self.assertIn(b'compile_workers=8,', patched)
             self.assertIn(b'rounds=1, samples=4,', patched)
             self.assertIn(b'race_batch=8, race_budget=4 * (1 << 30),', patched)
             self.assertNotIn(b'rounds=1, samples=4,', (SOURCE/p.RELATIVE).read_bytes())

@@ -38,11 +38,6 @@ RUN if [ "$PREFILL_HASHES" = 1 ]; then \
       && python3 /opt/ds41/patches/prefill_hashes.py "$package" --check; \
     else test "$PREFILL_HASHES" = 0; fi
 LABEL local-inference.prefill-hash-overlay="${PREFILL_HASHES}"
-RUN package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")" \
-    && python3 /opt/ds41/patches/graph_requests.py "$package" \
-    && python3 /opt/ds41/patches/graph_requests.py "$package" --check \
-    && python3 -m py_compile "$package/v1/worker/gpu/cudagraph_utils.py"
-LABEL local-inference.graph-requests="ds41-graphs-v1"
 
 # Apply only the audited communication port to source and installed wheel.
 RUN python3 /opt/ds41/patches/roce.py /opt/b12x/b12x \

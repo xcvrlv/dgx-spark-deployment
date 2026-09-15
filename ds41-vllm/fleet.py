@@ -26,7 +26,6 @@ def load_config(path):
     assert len({n['host'] for n in c['nodes']}) == 4
     assert len({n['ip'] for n in c['nodes']}) == 4
     assert len(c['hcas']) == 2
-    assert type(c.get('graph_request_buckets', False)) is bool
     assert type(c.get('reduced_tuning', True)) is bool
     assert type(c.get('b12x_autotune', False)) is bool
     assert c['max_num_seqs'] in (8, 16), 'Supported profiles: c8 and c16'
@@ -80,7 +79,6 @@ def environment(c, rank):
     return {
         **{env: str(int(c.get('roce_optimizations', {}).get(key, False)))
            for key, env in ROCE_OPTIONS.items()},
-        'DS41_GRAPH_REQUEST_BUCKETS': str(int(c.get('graph_request_buckets', False))),
         'VLLM_HOST_IP': c['nodes'][rank]['ip'],
         'VLLM_WORKER_MULTIPROC_METHOD': 'spawn', 'VLLM_USE_V2_MODEL_RUNNER': '1',
         'VLLM_ENABLE_ROCE_ALLREDUCE': '1', 'VLLM_ENABLE_PCIE_ALLREDUCE': '0',
@@ -144,8 +142,12 @@ def serve_args(c, rank):
            '--tool-call-parser', 'deepseek_v41', '--enable-auto-tool-choice']
     depth = c['draft_tokens'] + 1
     maximum = c['max_num_seqs'] * depth
-    # Restore the earlier c8 token ladder; candidate racing is opt-in.
-    sizes = list(range(1, maximum + 1))
+    # Minimal base plus the cap: every captured size is a separate b12x
+    # specialization, so the sparse spread shrinks mandatory preparation and
+    # its resident priming memory proportionally. Decode batches pad up to the
+    # nearest captured size, so the base keeps single-token interactivity while
+    # mid-size decode batches pad to the cap.
+    sizes = sorted({size for size in (1, 2, 8) if size <= maximum} | {maximum})
     compilation = {'cudagraph_mode': 'FULL_AND_PIECEWISE', 'custom_ops': ['all'],
                    'cudagraph_capture_sizes': sizes,
                    'pass_config': {'fuse_allreduce_rms': False}}
@@ -189,9 +191,6 @@ def preflight(c):
         script += shlex.join(['mkdir', '-p', c['cache_path']]) + '\n'
         script += shlex.join(['test', '-r', checkpoint_path(c, c['model_path']) + '/config.json']) + '\n'
         script += shlex.join(['docker', 'image', 'inspect', '--format', '{{.Os}}/{{.Architecture}}', c['image']]) + " | grep -qx linux/arm64\n"
-        if c.get('graph_request_buckets', False):
-            script += shlex.join(['docker', 'image', 'inspect', '--format',
-                                  '{{index .Config.Labels "local-inference.graph-requests"}}', c['image']]) + " | grep -qx ds41-graphs-v1\n"
         if any(c.get('roce_optimizations', {}).values()):
             script += shlex.join(['docker', 'image', 'inspect', '--format',
                                   '{{index .Config.Labels "local-inference.roce-overlay"}}', c['image']]) + " | grep -qx ds41-roce-v1\n"

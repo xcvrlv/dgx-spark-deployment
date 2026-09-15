@@ -1,9 +1,10 @@
-# DeepSeek V4.1 Flash — JJ + b12x, four Sparks
+# DeepSeek V4.1 Flash ï¿½ JJ + b12x, four Sparks
 
 Current recipe: **[R38 / latest JJ, max-seqs8](UPSTREAM-R38.md)**, 384K context,
-DSpark5, utilization0.85, OMP2, explicit256/128 KV pages and c1-c8 graph coverage.
-Run build-image.sh and configure-r38.py. fleet.py defaults to cluster-r38-c8.json.
-The older c16 and c8 profiles below are retained for historical comparisons.
+DSpark5, utilization0.85, OMP2 and explicit256/128 KV pages with the sparse
+graph capture spread. Run build-image.sh and configure-r38.py. fleet.py
+defaults to cluster-r38-c8.json.
+The older c16 and c8 profiles below carry the R38 image tag.
 
 ## Build and run on Spark 1
 
