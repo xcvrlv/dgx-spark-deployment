@@ -39,6 +39,17 @@ RUN if [ "$PREFILL_HASHES" = 1 ]; then \
     else test "$PREFILL_HASHES" = 0; fi
 LABEL local-inference.prefill-hash-overlay="${PREFILL_HASHES}"
 
+# Apply the disk-Engram compatibility properties and the reduced tuning budget
+# to source and installed wheels; idempotent over an already-patched base.
+RUN python3 /opt/ds41/patches/engram_disk.py /opt/b12x/b12x \
+    && package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \
+    && python3 /opt/ds41/patches/engram_disk.py "$package" \
+    && python3 /opt/ds41/patches/engram_disk.py "$package" --check \
+    && vllm_package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")" \
+    && python3 /opt/ds41/patches/b12x_tuning.py "$vllm_package" \
+    && python3 /opt/ds41/patches/b12x_tuning.py "$vllm_package" --check
+LABEL local-inference.b12x-tuning="v1" local-inference.engram-disk="v1"
+
 # Apply only the audited communication port to source and installed wheel.
 RUN python3 /opt/ds41/patches/roce.py /opt/b12x/b12x \
     && package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \

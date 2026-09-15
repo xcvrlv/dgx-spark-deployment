@@ -427,7 +427,10 @@ Fixes (launcher-side except the patch removal; no vLLM kernel recompile):
    The image tag drops -graphs-v1; the rebuild reuses the cached compile
    layers, so bash build-image.sh after copying the recipe is fast. Existing
    repaired R38 images also work under their old tag because the launcher
-   never sets the activation variable.
+   never sets the activation variable. The main Dockerfile now also applies
+   the engram_disk and b12x_tuning patches with their labels, so a full
+   build-image.sh run produces the complete image directly; the repair script
+   remains for already-built bases.
 2. serve_args restores the sparse capture spread: minimal base plus the cap,
    {1,2,8,48} at c8/k5. Both preparation stages then declare the same 8
    counts, the state-stage volume collapses back to the weights-stage scale
