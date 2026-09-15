@@ -327,6 +327,29 @@ survive. This is a launcher-only change: no image rebuild; stop, update the
 flag, start. Tradeoff: uncovered choices run heuristic defaults instead of
 measured winners.
 
+## Disk Engram shard metadata
+
+The pinned vllm c9dc4e5 _ensure_disk_table
+(models/deepseek_v4_1/common/engram.py) reads table.shard_start,
+table.shard_end, and table.shard_rows from the b12x engram DiskTable; the
+pinned b12x 3a8b879 keeps that window on self._cache (its own add_shard and
+require_complete read the same), so disk-backed Engram lookup fails with
+AttributeError at preparation. Checked upstream 2026-09-15: the b12x head
+40bcdf82a03b23c7ac45efc30d13f6b9516e35e5 is identical in this region, so
+upstream does not fix it; JJ's own default table_memory is device, so the disk
+path is evidently less tested upstream. The failure only triggers with
+table_memory=disk, which fleet.py has hardcoded since db73040; the older
+b12x 323107f still exposed those attributes directly. patches/engram_disk.py
+adds shard_start, shard_end, and shard_rows properties exposing the clamped
+_cache values, matching the b12x internal pattern; both the lookup and embed
+call sites are covered. Hash-guarded against the pinned b12x source
+cd01e2b1d69b3d59731f8cb847e09d577a8dda29144ab90752756d4b93bd5183; --check
+verifies application and --revert restores it. The image tag gains -engram-v1
+and label local-inference.engram-disk=v1; preflight guards the label, so a
+stale bake fails fast. The alternative launcher-only escape, table_memory=ram,
+moves the tables to mapped host RAM and avoids the DiskTable entirely at the
+cost of host RAM and PCIe reads per lookup.
+
 42 CPU tests pass, including the patch's guard/idempotence/rollback checks
 against the pinned tree, the prior-patch-variant repair check, the pinned
 anchor assertion, the new capture-size lists for every profile, and the
