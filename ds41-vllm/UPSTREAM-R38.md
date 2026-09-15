@@ -333,3 +333,26 @@ anchor assertion, the new capture-size lists for every profile, and the
 preflight label guard with rollback. GPU qualification on the four Sparks is
 still required to establish collective correctness, replay, and the actual
 fleet speedup.
+
+
+## Conservative c8 startup (2026-09-15)
+
+Checked latest JJ 5bca5a58d970216bd46be82575e824c6e424c465 and b12x
+213fc1b204b306bdbaa7d40d2a27529658128bf7 at 11:05 UTC. These are newer
+than the R38 pins. No source patch or pin update is needed: pinned R38 already
+supports kernel_config.enable_b12x_autotune=false. This uses the existing native
+switch, so there is no local source workaround for upstream to supersede.
+
+The launcher now defaults missing b12x_autotune to false. configure-r38.py
+explicitly copies that default even when its input enabled tuning. The c8 recipe
+opts out of the extra request-bucket experiment and reduced-tuning label gate;
+it restores the full earlier token-size ladder (1..48 at k5). R38 cache geometry,
+384Ki context, c8/k5, 0.85 memory utilization and OMP2 remain. Cached/default
+kernel preparation and graph capture still run; this removes candidate racing,
+not all startup allocations. It is not a guarantee against every possible OOM.
+
+Existing repaired R38 images need no rebuild. Copy fleet.py, then update the
+operator config to b12x_autotune=false, graph_request_buckets=false,
+reduced_tuning=false, max_num_seqs=8, draft_tokens=5. Keep its existing image,
+checkpoint path and cache path; stop and start the fleet. Extra request buckets
+can be explicitly enabled with configure-r38.py --graph-coverage.

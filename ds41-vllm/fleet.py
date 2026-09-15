@@ -28,7 +28,7 @@ def load_config(path):
     assert len(c['hcas']) == 2
     assert type(c.get('graph_request_buckets', False)) is bool
     assert type(c.get('reduced_tuning', True)) is bool
-    assert type(c.get('b12x_autotune', True)) is bool
+    assert type(c.get('b12x_autotune', False)) is bool
     assert c['max_num_seqs'] in (8, 16), 'Supported profiles: c8 and c16'
     assert set(c.get('roce_optimizations', {})) <= set(ROCE_OPTIONS)
     assert all(type(v) is bool for v in c.get('roce_optimizations', {}).values())
@@ -144,17 +144,13 @@ def serve_args(c, rank):
            '--tool-call-parser', 'deepseek_v41', '--enable-auto-tool-choice']
     depth = c['draft_tokens'] + 1
     maximum = c['max_num_seqs'] * depth
-    # Sparse spread: every captured size is a separate b12x tuning declaration,
-    # so a minimal base plus the cap shrinks preparation and its resident
-    # candidate memory proportionally. Decode batches pad up to the nearest
-    # captured size, so the base keeps single-token interactivity while
-    # mid-size decode batches pad to the cap.
-    sizes = sorted({size for size in (1, 2, 8) if size <= maximum} | {maximum})
+    # Restore the earlier c8 token ladder; candidate racing is opt-in.
+    sizes = list(range(1, maximum + 1))
     compilation = {'cudagraph_mode': 'FULL_AND_PIECEWISE', 'custom_ops': ['all'],
                    'cudagraph_capture_sizes': sizes,
                    'pass_config': {'fuse_allreduce_rms': False}}
     cmd += ['--compilation-config', json.dumps(compilation)]
-    if not c.get('b12x_autotune', True):
+    if not c.get('b12x_autotune', False):
         # Startup candidate racing overdrafts the device on this fleet. With
         # autotune off nothing is timed: every choice is prepared with its
         # default or cached configuration. The per-field backend flags above
