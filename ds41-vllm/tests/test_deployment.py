@@ -47,6 +47,22 @@ class RoceCheckTests(unittest.TestCase):
         self.assertIn('B12xPreparationCoordinator', unparsed)
         self.assertIn("outcome['error'] is None", unparsed)
 
+    def test_coordinator_batches_are_request_autotune_pairs(self):
+        # The coordinator unpacks (requests, autotune) per batch; a bare
+        # request tuple fails at construction with "not enough values to
+        # unpack (expected 2, got 1)".
+        tree = ast.parse((ROOT / 'roce-check.py').read_text())
+        call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == 'B12xPreparationCoordinator')
+        expression = compile(ast.Expression(call.args[1]), '<batches>', 'eval')
+        units = [SimpleNamespace(requests=[object()])]
+        batches = eval(expression, {'units': units})
+        self.assertEqual(len(batches), 1)
+        for requests, autotune in batches:
+            self.assertEqual(len(requests), 1)
+            self.assertIs(autotune, False)
+
 
 class ImageCheckTests(unittest.TestCase):
     def test_build_check_does_not_import_driver_dependent_vllm(self):

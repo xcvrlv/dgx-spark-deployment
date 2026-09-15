@@ -57,7 +57,7 @@ def main():
 
     coordinator = B12xPreparationCoordinator(
         session,
-        [tuple(request for unit in units for request in unit.requests)],
+        [(tuple(request for unit in units for request in unit.requests), False)],
         global_rank=rank, world_group=exchange(dist.group.WORLD),
     )
     outcome = coordinator.status()

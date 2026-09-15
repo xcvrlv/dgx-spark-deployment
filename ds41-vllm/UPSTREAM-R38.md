@@ -538,7 +538,17 @@ close()` releases only retained benchmark trials, so the published RoCE plan
 stays installed for the comparison. The repair script's stale-bake guard
 `check_sha` is updated together with the file.
 
-45 CPU tests pass, including the AST gate asserting the check uses the world
-coordinator (no uncoordinated `session.prepare(`) and asserts on the
-coordinator's error outcome. GPU qualification on the four Sparks is still
+**Second user-observed failure, first bake:** the coordinator constructor
+expects `(requests, autotune)` pairs per batch; the first shim passed a bare
+request list, failing at construction with `ValueError: not enough values to
+unpack (expected 2, got 1)` (the workload declares one request, so the bare
+tuple had one element). Fixed to `[(requests, False)]`; the AST gate now
+evaluates the actual argument expression against the real one-request shape
+and asserts it unpacks with `autotune=False`, so this shape mistake fails the
+suite instead of the fleet.
+
+46 CPU tests pass, including the AST gates asserting the check uses the world
+coordinator (no uncoordinated `session.prepare(`), asserts on the
+coordinator's error outcome, and that the batches argument is a
+request/autotune pair. GPU qualification on the four Sparks is still
 required.
