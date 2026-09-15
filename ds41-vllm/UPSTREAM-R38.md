@@ -629,3 +629,28 @@ a cached repair — then share, stop and start the fleet as in the command at
 the top. GPU qualification is still required: the rebase must establish that
 profile_run sees prepared V4.1 attention metadata and that the four ranks
 prime the RoCE collective in the same round.
+
+### Follow-up: launcher-only fabric_check gate (2026-09-15)
+
+For faster iteration on the rebase, fleet.py start now honors a
+`fabric_check` recipe key: absent or true runs the four-node comparison
+unchanged (fail-closed); false skips only the torchrun comparison, while
+preflight (label gates, HCA state, io_uring, image/model checks) still runs.
+This is a launcher-side change: copy fleet.py, set the key, stop and start —
+no image rebuild. The standalone `fabric` action always qualifies regardless
+of the key.
+
+Tradeoffs when skipped: serving startup still drives the same coordinated
+collective path (the coordination fix is in the image), so the four ranks
+still prime in one authorized round — but the numerical RoCEnante/NCCL
+comparison and the shared compile-cache warm-up live only in the fabric
+check, so the first serving startup may compile for real on a cold cache, and
+a fabric-level failure would surface as a serving startup error in the rank
+logs instead of a pre-serve abort. Run
+`python3 fleet.py --config <config> fabric` (while the model service is
+stopped) to qualify separately.
+
+cluster-r38-c8.json opts out (fabric_check false); the retained c8/c16
+profiles and an absent key default to running the comparison. 47 CPU tests
+pass, including the gate: start skips with the key, and the standalone
+fabric action and an absent key still run the comparison.

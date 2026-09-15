@@ -45,5 +45,6 @@
   "omp_num_threads": 2,
   "swa_block_size": 128,
   "b12x_autotune": false,
-  "reduced_tuning": false
+  "reduced_tuning": false,
+  "fabric_check": false
 }

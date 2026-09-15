@@ -316,6 +316,38 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(a['VLLM_ENABLE_ROCE_ALLREDUCE'], '1')
         self.assertEqual(a['VLLM_ENABLE_PCIE_ALLREDUCE'], '0')
 
+    def test_fabric_check_gate(self):
+        # fabric_check false skips the four-rank comparison inside start;
+        # an absent key and the standalone fabric action still run it
+        # (fail-closed). Each start probe ends at the startup deadline.
+        def dispatch(config, action):
+            with patch.object(sys, 'argv', ['fleet.py', '--config', str(config), action]), \
+                 patch.object(fleet, 'preflight'), \
+                 patch.object(fleet, 'fabric') as fabric, \
+                 patch.object(fleet, 'remote', return_value=''), \
+                 patch.object(fleet, 'request', side_effect=OSError), \
+                 patch.object(fleet, 'smoke'), \
+                 patch.object(fleet.time, 'monotonic', side_effect=[0, 10 ** 9]):
+                if action == 'start':
+                    with self.assertRaises(TimeoutError):
+                        fleet.main()
+                else:
+                    fleet.main()
+            return fabric
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / 'skipped.json'
+            raw = json.loads((ROOT / 'cluster-r38-c8.json').read_text())
+            raw['fabric_check'] = False
+            p.write_text(json.dumps(raw))
+            self.assertFalse(dispatch(p, 'start').called)
+            self.assertTrue(dispatch(p, 'fabric').called)
+            raw_default = json.loads((ROOT / 'cluster-r38-c8.json').read_text())
+            raw_default.pop('fabric_check', None)
+            p2 = Path(d) / 'default.json'
+            p2.write_text(json.dumps(raw_default))
+            self.assertTrue(dispatch(p2, 'start').called)
+
     def test_duplicate_node_rejected(self):
         self.c['nodes'][1] = copy.deepcopy(self.c['nodes'][0])
         with tempfile.TemporaryDirectory() as d:

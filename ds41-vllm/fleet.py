@@ -327,7 +327,14 @@ def main():
         for rank in range(4):
             remote(c, rank, f'! docker container inspect {NAME}-{rank} >/dev/null 2>&1')
         preflight(c)
-        fabric(c)
+        if c.get('fabric_check', True):
+            fabric(c)
+        else:
+            # Launcher-only skip: serving startup still drives the same
+            # coordinated collective path. Qualify with the standalone
+            # `fabric` action (best while the fleet is stopped).
+            print('Skipping fabric qualification (fabric_check false); '
+                  'run `python3 fleet.py --config <config> fabric` to qualify.', flush=True)
         for rank in reversed(range(4)):
             print(remote(c, rank, plan(c, rank)), flush=True)
         deadline = time.monotonic() + c['startup_timeout']

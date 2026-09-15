@@ -25,9 +25,11 @@ python3 fleet.py --config fleet.local.json preflight
 python3 fleet.py --config fleet.local.json start
 ```
 
-`start` repeats preflight, runs the four-node fabric qualification, starts
-workers 3/2/1 and then head 0, waits for health, sends eight concurrent finite
-logprob requests, and requires a log confirming live RoCEnante dispatch.
+`start` repeats preflight, runs the four-node fabric qualification unless
+`fabric_check` is false in the config (skip is launcher-only; qualify with the
+standalone `fabric` action), starts workers 3/2/1 and then head 0, waits for
+health, sends eight concurrent finite logprob requests, and requires a log
+confirming live RoCEnante dispatch.
 Failures retain serving containers for diagnosis. Fabric test containers are
 removed after their logs are collected. Existing serving containers must be
 stopped explicitly before another start; other deployments are not removed.
