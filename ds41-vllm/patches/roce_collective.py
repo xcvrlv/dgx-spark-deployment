@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""World-coordinate the RoCE collective priming; checked against vllm c9dc4e5 on 2026-09-15.
+"""World-coordinate the RoCE collective priming; checked against vllm 5bca5a5 (target unchanged since c9dc4e5) on 2026-09-15.
 
 The RoCE prepare call primes a real four-rank all-reduce and all-gather
 (``_preparation.prepared_call`` -> ``state.all_reduce``). The session only

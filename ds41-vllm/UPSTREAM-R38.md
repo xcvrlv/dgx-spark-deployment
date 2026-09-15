@@ -552,3 +552,80 @@ coordinator (no uncoordinated `session.prepare(`), asserts on the
 coordinator's error outcome, and that the batches argument is a
 request/autotune pair. GPU qualification on the four Sparks is still
 required.
+
+## VLLM pin rebase to 5bca5a5 (2026-09-15)
+
+**User-observed, on the first start after the coordination rebuild:** the
+fabric qualification passed and the b12x weights-stage preparation completed
+for the first time — the RoCE coordination fix works end to end — but startup
+then failed at profile_run with `PreparationResourceUnavailableError: V4.1
+attention metadata is not prepared` (deepseek_v4_1/attention.py _forward).
+Source-level audit against the pinned trees (JJ c9dc4e5, b12x 3a8b879)
+establishes the failure is pre-existing in the pin, not a regression of the
+coordination work.
+
+**Root cause:** the DeepSeek V4.1 helper unit declares `stage="state"`, so its
+`_prepare(device)` only runs in the compile_or_warm_up_model stage — after
+profile_run, which consumes the attention metadata. Upstream fixed this at
+5bca5a5: the helpers unit moved to `stage="weights"`, profile_run accepts a
+`prepare_profile_state` callback (gpu_worker passes
+`self._prepare_b12x_profile_state`), and _dummy_run invokes it after
+`_init_minimal_kv_cache_for_profiling(num_blocks=1)`, plus
+`_wo_preparation_unit` and additional guards. A narrow one-line patch
+(helpers stage only) is insufficient: at the weights stage the KV caches are
+`torch.tensor([])` placeholders (numel == 0), so the provider returns no units
+there regardless of stage — the full upstream restructure is what makes
+profile_run see prepared attention metadata.
+
+**User-approved pin update:** versions.env advances VLLM_COMMIT to
+5bca5a58d970216bd46be82575e824c6e424c465, adopting all upstream execution
+changes; the image tag becomes jj-5bca5a5-... in all three recipes. The b12x
+pin stays at 3a8b879: the b12x head (92cd380) still declares API_VERSION = 1
+(the adapter contract), the b12x-side patches are hash-guarded against the pin
+and apply cleanly, and re-auditing every b12x patch against the head is
+unnecessary for a failure that lives in the vLLM tree.
+
+**Patch targets re-audited at 5bca5a5 (blob identities, raw-file sha256):**
+
+- `vllm/distributed/device_communicators/b12x_roce_all_reduce.py` — unchanged
+  (b8987d09...), so patches/roce_collective.py applies as is.
+- `vllm/v1/core/block_pool.py` — unchanged (a0932da6...), so
+  patches/prefill_hashes.py applies as is.
+- `vllm/model_executor/warmup/b12x_prepare.py` — changed (2213eb87... →
+  9521a4f8...), but the exact anchor `compile_workers=16,\n    )` survives
+  once and the patched result compiles, so patches/b12x_tuning.py applies
+  with its SOURCE_SHA rebased. get_b12x_session's autotune gate
+  (`session.autotune and os.environ.get('B12X_AUTOTUNE', '1') != '0'`)
+  survives, so `b12x_autotune: false` still skips the tuning shard.
+
+**Contract surfaces survive at 5bca5a5:** B12xPreparationCoordinator,
+_authorize_ready, and StatelessProcessGroup remain in
+vllm/v1/worker/b12x_startup.py; the gpu_worker coordinator RPCs
+(begin/advance/abort_b12x_preparation) survive; prepare_b12x_locally is
+renamed prepare_b12x_profile upstream and gpu_worker calls it with
+stage="state" — consistent with roce-check.py's coordinator use.
+enable_b12x_autotune remains a KernelConfig ignored_factor.
+
+**Checked revisions (2026-09-15 17:29 UTC):** JJ dev/jovian-judgement
+5bca5a58d970216bd46be82575e824c6e424c465, b12x HEAD
+92cd3800932539c947c9a8e06123fe5f36c9eae4 (not adopted); check-upstream.py
+reports the vllm pin equal to the upstream head.
+
+**Windows audit-tree note:** the local pinned tree must be cloned with
+`git -c core.autocrlf=false clone --depth 1 --branch dev/jovian-judgement ...`.
+A plain Windows checkout rewrites the files that differ from the default
+branch with CRLF line endings, which corrupts the blob-level sha identities
+the hash guards compare; the Linux build checkout is unaffected. The audit
+tree is re-cloned at 5bca5a5 (tmp/jj-audit/local-inference-lab-vllm-5bca5a5)
+and the vllm test SOURCE defaults point at it; the b12x tree is unchanged.
+
+46 CPU tests pass against the new tree, including the tuning patch gates
+against the rebased SOURCE_SHA, the roce_collective and prefill hash guards
+against the unchanged targets, and the versions.env/recipe image-tag
+consistency gate. This is a full-image change (new vLLM revision): copy the
+updated recipe and run bash build-image.sh on the Spark — a new vLLM commit
+invalidates the vLLM build layers, so expect a full vLLM rebuild rather than
+a cached repair — then share, stop and start the fleet as in the command at
+the top. GPU qualification is still required: the rebase must establish that
+profile_run sees prepared V4.1 attention metadata and that the four ranks
+prime the RoCE collective in the same round.

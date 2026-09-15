@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('prefill_hashes', ROOT / 'patches/prefill_hashes.py')
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
-SOURCE = Path(os.environ.get('DS41_VLLM_SOURCE', ROOT.parent / 'tmp/jj-audit/local-inference-lab-vllm-c9dc4e5/vllm'))
+SOURCE = Path(os.environ.get('DS41_VLLM_SOURCE', ROOT.parent / 'tmp/jj-audit/local-inference-lab-vllm-5bca5a5/vllm'))
 
 
 @unittest.skipUnless(SOURCE.is_dir(), 'set DS41_VLLM_SOURCE to the pinned vllm package')
