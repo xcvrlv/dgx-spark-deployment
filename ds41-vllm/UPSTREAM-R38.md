@@ -303,6 +303,30 @@ bare-SystemExit source) that the startup coordinator reports as preparation
 errors, not b12x failures; identifying the trigger requires the full rank-0
 container logs.
 
+The rapid OOM persisted even with race_batch=8 and race_budget=4GiB, so the
+race budget is not the binding constraint: the baseline (model and draft
+weights, KV pool at 0.85, DSpark draft-lane declarations roughly doubling
+plans and winners, graph-bucket pools) sits near the ceiling and a single
+candidate materialize can overdraw. For comparison, the earlier c8 profile
+(jj-35601be/b12x-323107f, draft_tokens=0, utilization 0.80, no draft lane, no
+graph buckets) ran stock tuning with the same free//2 budget and fit, but
+slowly - stock rounds=3 x samples=8, race_batch=32, and compile_workers=8 are
+exactly what the reduction above addresses.
+
+fleet.py now gains a b12x_autotune flag (default true); when false, serve_args
+passes --kernel-config {"enable_b12x_autotune": false}. enable_b12x_autotune
+is in KernelConfig.ignored_factors, so toggling does not invalidate compile or
+selection caches; cached winners are still used where available. With
+autotune disabled, b12x_batches puts every request in the default-only batch
+and nothing is timed: no candidate races, so the racing OOM disappears;
+mandatory preparation (compile plus one default-config materialize per plan)
+always runs. The dataclass-typed --kernel-config arg parses JSON via
+TypeAdapter, and the per-field --moe-backend/--linear-backend flags are
+applied on top via deepcopy in create_engine_config, so the b12x backends
+survive. This is a launcher-only change: no image rebuild; stop, update the
+flag, start. Tradeoff: uncovered choices run heuristic defaults instead of
+measured winners.
+
 42 CPU tests pass, including the patch's guard/idempotence/rollback checks
 against the pinned tree, the prior-patch-variant repair check, the pinned
 anchor assertion, the new capture-size lists for every profile, and the

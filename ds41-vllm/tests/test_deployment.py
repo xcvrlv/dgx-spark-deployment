@@ -84,6 +84,23 @@ class FleetTests(unittest.TestCase):
             self.assertNotIn('--hf-overrides', args)
             self.assertNotIn('--speculative-config', args)
 
+    def test_b12x_autotune_switch_keeps_backends(self):
+        # The kernel-config JSON must not wipe the per-field backend flags;
+        # create_engine_config deepcopies and applies those on top.
+        self.assertNotIn('--kernel-config', fleet.serve_args(self.c, 0))
+        bad = dict(self.c, b12x_autotune='off')
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'bad.json'
+            path.write_text(json.dumps(bad))
+            with self.assertRaises(AssertionError):
+                fleet.load_config(path)
+        self.c['b12x_autotune'] = False
+        args = fleet.serve_args(self.c, 0)
+        config = json.loads(args[args.index('--kernel-config') + 1])
+        self.assertFalse(config['enable_b12x_autotune'])
+        self.assertEqual(args[args.index('--moe-backend') + 1], 'b12x')
+        self.assertEqual(args[args.index('--linear-backend') + 1], 'b12x')
+
     def test_draft_capture_covers_every_c8_depth(self):
         self.c['draft_tokens'] = 3
         args = fleet.serve_args(self.c, 0)

@@ -28,6 +28,7 @@ def load_config(path):
     assert len(c['hcas']) == 2
     assert type(c.get('graph_request_buckets', False)) is bool
     assert type(c.get('reduced_tuning', True)) is bool
+    assert type(c.get('b12x_autotune', True)) is bool
     assert c['max_num_seqs'] in (8, 16), 'Supported profiles: c8 and c16'
     assert set(c.get('roce_optimizations', {})) <= set(ROCE_OPTIONS)
     assert all(type(v) is bool for v in c.get('roce_optimizations', {}).values())
@@ -153,6 +154,12 @@ def serve_args(c, rank):
                    'cudagraph_capture_sizes': sizes,
                    'pass_config': {'fuse_allreduce_rms': False}}
     cmd += ['--compilation-config', json.dumps(compilation)]
+    if not c.get('b12x_autotune', True):
+        # Startup candidate racing overdrafts the device on this fleet. With
+        # autotune off nothing is timed: every choice is prepared with its
+        # default or cached configuration. The per-field backend flags above
+        # still apply on top of this JSON in create_engine_config.
+        cmd += ['--kernel-config', json.dumps({'enable_b12x_autotune': False})]
     if c['draft_tokens']:
         cmd += ['--speculative-config', json.dumps({
             'method': 'dspark', 'num_speculative_tokens': c['draft_tokens'],

@@ -44,5 +44,6 @@
   },
   "omp_num_threads": 2,
   "graph_request_buckets": true,
-  "swa_block_size": 128
+  "swa_block_size": 128,
+  "b12x_autotune": false
 }
