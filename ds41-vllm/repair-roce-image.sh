@@ -2,7 +2,9 @@
 set -euo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/versions.env"
-base="${BASE_IMAGE:-${IMAGE%-tuning-v1}}"
+# Strip the -tuning-vN suffix for any N so tag bumps keep resolving to the
+# dtype/programs base image; BASE_IMAGE overrides the computation.
+base="${BASE_IMAGE:-${IMAGE%%-tuning-v*}}"
 output="$IMAGE"
 # sha256 of the fixed roce-check.py; update it together with that file. The
 # guard makes a stale bake fail the build instead of shipping the old check.
