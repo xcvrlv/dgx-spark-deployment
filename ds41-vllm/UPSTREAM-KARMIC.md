@@ -62,12 +62,19 @@ cache paths in the fleet config:
 
 ```bash
 cd ds41-vllm
-bash build-image.sh
 python3 configure-karmic.py --from-config cluster-r38-c8.json --output fleet.karmic.json
+python3 fleet.py --config cluster-r38-c8.json stop
+bash build-image.sh
+```
+
+Continue only after the build reports `Built spark-vllm-ds41:...`. The image
+check links native Engram storage against the CUDA toolkit's driver stub during
+the image build. The GPU check after the build loads the real host driver.
+
+```bash
 python3 fleet.py --config fleet.karmic.json share
 python3 fleet.py --config fleet.karmic.json plan
 python3 fleet.py --config fleet.karmic.json preflight
-python3 fleet.py --config cluster-r38-c8.json stop
 python3 fleet.py --config fleet.karmic.json start
 ```
 

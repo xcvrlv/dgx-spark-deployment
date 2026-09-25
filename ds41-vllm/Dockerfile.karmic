@@ -42,7 +42,9 @@ RUN python3 /opt/ds41/patches/roce_karmic.py /opt/b12x/b12x \
     && /opt/ds41/patches/probe_roce
 
 COPY image-check.py model-check.py roce-check.py /opt/ds41/
-RUN python3 /opt/ds41/image-check.py \
+RUN test -f "$CUDA_HOME/lib64/stubs/libcuda.so" \
+    && LIBRARY_PATH="$CUDA_HOME/lib64/stubs${LIBRARY_PATH:+:$LIBRARY_PATH}" \
+       python3 /opt/ds41/image-check.py \
     && python3 -m pip freeze > /opt/ds41/pip-freeze.txt
 LABEL org.opencontainers.image.title="DeepSeek V4.1 Flash Karmic Kraken TP4 ARM64 SM121" \
       org.opencontainers.image.revision="${VLLM_COMMIT}" \

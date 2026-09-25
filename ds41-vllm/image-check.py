@@ -13,8 +13,9 @@ assert platform.machine() == 'aarch64', platform.machine()
 from b12x.comm.roce._proxy import load
 from b12x.loader._native import _build as build_storage
 
-# Docker build has no host libcuda. Check the wheel contents without importing
-# vLLM (including adapters that can transitively import its CUDA extensions).
+# Docker build has no host libcuda. The Dockerfile makes the CUDA link stub
+# available for native compilation only; runtime loading uses the host driver.
+# Check the wheel contents without importing driver-dependent vLLM adapters.
 package = Path(distribution('vllm').locate_file('vllm'))
 assert list(package.glob('_C_stable_libtorch*.so')), package
 assert version('nvidia-cutlass-dsl') == os.getenv('DS41_EXPECT_CUTLASS_DSL', '4.6.2')
