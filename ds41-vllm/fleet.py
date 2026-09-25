@@ -18,6 +18,18 @@ ROCE_OPTIONS = {
     'skip_empty_cq': 'B12X_ROCE_SKIP_EMPTY_CQ',
     'lazy_payload_init': 'B12X_ROCE_LAZY_PAYLOAD_INIT',
 }
+# The display reserve is firmware memory the OS cannot use, so it is credited to
+# the KV budget rather than reached through gpu_memory_utilization. The DRM group
+# is resolved on the node; this token is shell-expanded in plan(), not quoted.
+DISPLAY_KV_GID_NAME = 'DS41_DISPLAY_KV_GID'
+DISPLAY_KV_GID = '$' + DISPLAY_KV_GID_NAME
+DISPLAY_KV_MAX_MIB = 1792
+
+
+def display_kv(c):
+    """Display-reserve credit for this deployment, or None when disabled."""
+    settings = c.get('display_kv', {})
+    return settings if settings.get('enabled', False) else None
 
 
 def load_config(path):
@@ -28,6 +40,15 @@ def load_config(path):
     assert len(c['hcas']) == 2
     assert type(c.get('reduced_tuning', True)) is bool
     assert type(c.get('b12x_autotune', False)) is bool
+    assert c.get('upstream_branch', 'dev/jovian-judgement') in (
+        'dev/jovian-judgement', 'dev/karmic-kraken')
+    if c.get('upstream_branch') == 'dev/karmic-kraken':
+        assert type(c.get('b12x_compile_workers')) is int and 1 <= c['b12x_compile_workers'] <= 16
+        for key in ('vllm_commit', 'b12x_commit'):
+            assert isinstance(c.get(key), str) and len(c[key]) == 40
+        assert not display_kv(c), 'Karmic image has no display-KV overlay'
+        assert not c.get('reduced_tuning', False), 'Karmic image has no tuning overlay'
+        assert 'graph_request_buckets' not in c and not c.get('torch_profile', False)
     assert c['max_num_seqs'] in (8, 16), 'Supported profiles: c8 and c16'
     assert set(c.get('roce_optimizations', {})) <= set(ROCE_OPTIONS)
     assert all(type(v) is bool for v in c.get('roce_optimizations', {}).values())
@@ -45,6 +66,16 @@ def load_config(path):
         'Batch capacity must cover DSpark parallel-drafting profiling rows'
     for key in ('model_path', 'cache_path'):
         assert c[key].startswith('/') and c[key] != '/' and ',' not in c[key]
+    settings = c.get('display_kv', {})
+    assert set(settings) <= {'enabled', 'display_mib', 'drm_card'}, 'Unknown display_kv key'
+    assert type(settings.get('enabled', False)) is bool
+    if settings:
+        # Fail closed on a bad credit: the backing span is fixed at this size,
+        # so a larger credit would be admitted and then fail at allocation.
+        mib = settings.get('display_mib', 0)
+        assert type(mib) is int and 1 <= mib <= DISPLAY_KV_MAX_MIB, 'display_mib must be 1..1792'
+        card = settings.get('drm_card', '')
+        assert type(card) is str and card.startswith('/dev/dri/card'), 'drm_card must be a /dev/dri/card node'
     checkpoint_path(c, '/checkpoint')
     return c
 
@@ -76,7 +107,7 @@ trap 'rc=$?; printf "FAILED (exit %s) at remote line %s: %s\\n" "$rc" "$LINENO" 
 
 
 def environment(c, rank):
-    return {
+    environment = {
         **{env: str(int(c.get('roce_optimizations', {}).get(key, False)))
            for key, env in ROCE_OPTIONS.items()},
         'VLLM_HOST_IP': c['nodes'][rank]['ip'],
@@ -88,6 +119,7 @@ def environment(c, rank):
         'NCCL_NET': 'IB', 'NCCL_IB_DISABLE': '0', 'NCCL_DEBUG': 'INFO',
         'NCCL_IB_HCA': '=' + ','.join(c['hcas']), 'NCCL_IB_GID_INDEX': str(c['gid_index']),
         'NCCL_NVLS_ENABLE': '0', 'NCCL_IB_MERGE_NICS': '0', 'NCCL_CROSS_NIC': '1',
+        'NCCL_P2P_DISABLE': '1',
         'NCCL_MIN_NCHANNELS': '4', 'NCCL_MAX_NCHANNELS': '4',
         'NCCL_IGNORE_CPU_AFFINITY': '1',
         'CUTE_DSL_ARCH': 'sm_121a', 'TORCH_CUDA_ARCH_LIST': '12.1a',
@@ -95,8 +127,22 @@ def environment(c, rank):
         'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True',
         'MALLOC_ARENA_MAX': '2', 'TOKENIZERS_PARALLELISM': 'false',
         'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1',
-        'XDG_CACHE_HOME': '/cache', 'VLLM_USE_BREAKABLE_CUDAGRAPH': '0',
+        'XDG_CACHE_HOME': '/cache',
     }
+    if c.get('upstream_branch') == 'dev/karmic-kraken':
+        # Compilation workers share physical RAM with the GPU on GB10.
+        environment['B12X_COMPILE_WORKERS'] = str(c['b12x_compile_workers'])
+    else:
+        environment['VLLM_USE_BREAKABLE_CUDAGRAPH'] = '0'
+    display = display_kv(c)
+    if display:
+        # Additive only: the display capability set and the credit are absent
+        # when the deployment is disabled, so it stays byte-identical to today.
+        environment.update(
+            NVIDIA_DRIVER_CAPABILITIES='compute,utility,graphics,display',
+            DS41_DISPLAY_KV_MIB=str(display['display_mib']),
+        )
+    return environment
 
 
 def docker(c, rank, name=None):
@@ -107,6 +153,12 @@ def docker(c, rank, name=None):
            '--mount', f"type=bind,src={c['model_path']},dst=/checkpoint,readonly",
            '--mount', f"type=bind,src={c['cache_path']},dst=/cache",
            '--entrypoint', '', '-e', 'NCCL_SOCKET_IFNAME', '-e', 'GLOO_SOCKET_IFNAME']
+    display = display_kv(c)
+    if display:
+        # Expose only the DRM card and its group, never elevate the worker.
+        # The group id is resolved on the node and expanded by plan().
+        cmd += ['--device', display['drm_card'], '--group-add', DISPLAY_KV_GID]
+        cmd += ['-e', DISPLAY_KV_GID_NAME]
     cmd += ['--detach', '--name', name] if name else ['--rm']
     for key, value in environment(c, rank).items():
         cmd += ['-e', f'{key}={value}']
@@ -116,11 +168,20 @@ def docker(c, rank, name=None):
 def setup(c, rank):
     # The interface is discovered separately on every node, never copied from rank 0.
     ip = shlex.quote(c['nodes'][rank]['ip'])
-    return f'''iface=$(ip -o -4 address show | awk -v wanted={ip} 'split($4,a,"/") && a[1]==wanted {{print $2}}')
+    script = f'''iface=$(ip -o -4 address show | awk -v wanted={ip} 'split($4,a,"/") && a[1]==wanted {{print $2}}')
 test -n "$iface"
 test "$(printf '%s\\n' "$iface" | wc -l)" = 1
 export NCCL_SOCKET_IFNAME="=$iface" GLOO_SOCKET_IFNAME="$iface"
 '''
+    display = display_kv(c)
+    if display:
+        # The DRM group is discovered on the node for the same reason: it is a
+        # node property, so it is never copied from rank 0.
+        card = shlex.quote(display['drm_card'])
+        script += f'''test -c {card}
+export {DISPLAY_KV_GID_NAME}="$(stat -c '%g' {card})"
+'''
+    return script
 
 
 def serve_args(c, rank):
@@ -140,18 +201,15 @@ def serve_args(c, rank):
            '--no-scheduler-reserve-full-isl',
            '--generation-config', 'vllm', '--reasoning-parser', 'deepseek_v41',
            '--tool-call-parser', 'deepseek_v41', '--enable-auto-tool-choice']
-    depth = c['draft_tokens'] + 1
-    maximum = c['max_num_seqs'] * depth
-    # Minimal base plus the cap: every captured size is a separate b12x
-    # specialization, so the sparse spread shrinks mandatory preparation and
-    # its resident priming memory proportionally. Decode batches pad up to the
-    # nearest captured size, so the base keeps single-token interactivity while
-    # mid-size decode batches pad to the cap.
-    sizes = sorted({size for size in (1, 2, 8) if size <= maximum} | {maximum})
-    compilation = {'cudagraph_mode': 'FULL_AND_PIECEWISE', 'custom_ops': ['all'],
-                   'cudagraph_capture_sizes': sizes,
-                   'pass_config': {'fuse_allreduce_rms': False}}
-    cmd += ['--compilation-config', json.dumps(compilation)]
+    if c.get('upstream_branch') != 'dev/karmic-kraken':
+        depth = c['draft_tokens'] + 1
+        maximum = c['max_num_seqs'] * depth
+        # Legacy JJ capture spread; Karmic Kraken uses upstream defaults.
+        sizes = sorted({size for size in (1, 2, 8) if size <= maximum} | {maximum})
+        compilation = {'cudagraph_mode': 'FULL_AND_PIECEWISE', 'custom_ops': ['all'],
+                       'cudagraph_capture_sizes': sizes,
+                       'pass_config': {'fuse_allreduce_rms': False}}
+        cmd += ['--compilation-config', json.dumps(compilation)]
     if not c.get('b12x_autotune', False):
         # Startup candidate racing overdrafts the device on this fleet. With
         # autotune off nothing is timed: every choice is prepared with its
@@ -169,6 +227,9 @@ def serve_args(c, rank):
             ) if c.get(key) is not None}})]
     if c.get('swa_block_size') is not None:
         cmd += ['--swa-block-size', str(c['swa_block_size'])]
+    # No new vllm flag carries the credit: it travels as DS41_DISPLAY_KV_MIB in
+    # environment() and is read by the patched KV path, so stock vllm never has
+    # to understand a flag it does not define.
     if c.get('torch_profile', False):
         cmd += ['--profiler-config', json.dumps({
             'profiler': 'torch', 'torch_profiler_dir': '/cache/profiles',
@@ -181,7 +242,12 @@ def serve_args(c, rank):
 
 
 def plan(c, rank):
-    return setup(c, rank) + shlex.join(docker(c, rank, f'{NAME}-{rank}') + serve_args(c, rank)) + '\n'
+    line = shlex.join(docker(c, rank, f'{NAME}-{rank}') + serve_args(c, rank))
+    if display_kv(c):
+        # The DRM group is resolved on the node, so this one token has to be
+        # expanded by the shell instead of quoted as a literal by shlex.join.
+        line = line.replace(shlex.quote(DISPLAY_KV_GID), '"$' + DISPLAY_KV_GID_NAME + '"')
+    return setup(c, rank) + line + '\n'
 
 
 def preflight(c):
@@ -197,16 +263,43 @@ def preflight(c):
         if c.get('reduced_tuning', True):
             script += shlex.join(['docker', 'image', 'inspect', '--format',
                                   '{{index .Config.Labels "local-inference.b12x-tuning"}}', c['image']]) + " | grep -qx v1\n"
-        script += shlex.join(['docker', 'image', 'inspect', '--format',
-                              '{{index .Config.Labels "local-inference.engram-disk"}}', c['image']]) + " | grep -qx v1\n"
-        script += shlex.join(['docker', 'image', 'inspect', '--format',
-                              '{{index .Config.Labels "local-inference.roce-collective"}}', c['image']]) + " | grep -qx v1\n"
+        if c.get('upstream_branch') != 'dev/karmic-kraken':
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.engram-disk"}}', c['image']]) + " | grep -qx v1\n"
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.roce-collective"}}', c['image']]) + " | grep -qx v1\n"
+        else:
+            for label, commit in (('org.opencontainers.image.revision', c['vllm_commit']),
+                                  ('local-inference.b12x.commit', c['b12x_commit'])):
+                script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                      '{{index .Config.Labels "' + label + '"}}', c['image']])
+                script += ' | grep -qx ' + shlex.quote(commit) + '\n'
         script += f"fstype=$(findmnt -n -o FSTYPE -T {shlex.quote(c['model_path'])})\n"
         script += 'case "$fstype" in ext4|xfs|btrfs) ;; *) echo "Model must be local SSD storage, got $fstype"; exit 1;; esac\n'
         for hca in c['hcas']:
             base = f'/sys/class/infiniband/{hca}/ports/1'
             script += shlex.join(['grep', '-q', 'ACTIVE', base + '/state']) + '\n'
             script += shlex.join(['grep', '-q', 'RoCE v2', base + f"/gid_attrs/types/{c['gid_index']}"]) + '\n'
+        display = display_kv(c)
+        if display:
+            label = display['drm_card']
+            card = shlex.quote(label)
+            # Read-only host state: the launcher never changes modules, boot
+            # settings or the firmware reservation, it only refuses to start.
+            script += 'if [ -r /sys/module/nvidia_drm/parameters/modeset ]; then\n'
+            script += 'test "$(cat /sys/module/nvidia_drm/parameters/modeset)" = Y || ' \
+                      '{ echo "nvidia_drm modeset must be Y"; exit 1; }\n'
+            script += 'test "$(cat /sys/module/nvidia_drm/parameters/fbdev)" = N || ' \
+                      '{ echo "nvidia_drm fbdev must be N"; exit 1; }\n'
+            script += 'else echo "WARNING: nvidia_drm parameters unreadable as this user; ' \
+                      'verify with sudo and rely on display-check.py"; fi\n'
+            script += f'test -c {card} || {{ echo "missing DRM card {label}"; exit 1; }}\n'
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.display-kv"}}',
+                                  c['image']]) + ' | grep -qx v1\n'
+            # Fails closed inside the container rather than falling back to
+            # ordinary RAM at a utilization the credit already assumes.
+            script += shlex.join(docker(c, rank) + ['python3', '/opt/ds41/display-check.py']) + '\n'
         check = '''import ctypes
 lib=ctypes.CDLL('liburing.so.2')
 ring=ctypes.create_string_buffer(4096)
@@ -293,7 +386,7 @@ def smoke(c):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', default=str(HERE / 'cluster-r38-c8.json'))
+    parser.add_argument('--config', default=str(HERE / 'cluster-karmic-c16.json'))
     parser.add_argument('action', choices=['plan', 'share', 'preflight', 'fabric', 'start', 'smoke', 'status', 'logs', 'stop'])
     parser.add_argument('--rank', type=int, choices=range(4), default=0)
     args = parser.parse_args()

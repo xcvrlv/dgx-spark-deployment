@@ -2,7 +2,6 @@
 set -euo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/versions.env"
-if [[ ${PREFILL_HASHES:-1} == 0 ]]; then IMAGE="${IMAGE}-hashes-off"; fi
 [[ $(uname -m) == aarch64 ]] || { echo 'Build natively on a Spark (ARM64).' >&2; exit 1; }
 mkdir -p "$here/.build"
 python3 "$here/check-upstream.py" --output "$here/.build/upstream-check.json"
@@ -18,9 +17,9 @@ fi
 if [[ ${FILTER_ARTIFACT_TAGS:-1} == 1 ]]; then
   python3 "$here/prepare-build-tags.py" "$src" --commit "$VLLM_COMMIT"
 fi
-base="spark-vllm-ds41:jj-$VLLM_COMMIT-base"
-# Use JJ's complete build/dependency pipeline, including Rust and CUDA extensions.
-# The nightly path resolves one Torch/vision/audio set and shares it across stages.
+base="spark-vllm-ds41:kk-$VLLM_COMMIT-base"
+# Use Karmic Kraken's complete build/dependency pipeline, including Rust and CUDA extensions.
+# Karmic pins stable Torch 2.13.0; its CUDA 13 ARM64 wheel is published.
 # --platform alone cannot turn the upstream AMD64-only builder into ARM64.
 docker pull --platform linux/arm64 "$BUILD_BASE_IMAGE"
 [[ $(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$BUILD_BASE_IMAGE") == linux/arm64 ]] \
@@ -28,17 +27,16 @@ docker pull --platform linux/arm64 "$BUILD_BASE_IMAGE"
 docker build --platform linux/arm64 --target vllm-openai \
   --file "$src/docker/Dockerfile" \
   --build-arg BUILD_BASE_IMAGE="$BUILD_BASE_IMAGE" \
-  --build-arg PYTORCH_NIGHTLY=1 \
+  --build-arg PYTORCH_NIGHTLY=0 \
   --build-arg torch_cuda_arch_list=12.1a \
   --build-arg max_jobs="${MAX_JOBS:-4}" --build-arg nvcc_threads=1 \
   --build-arg VLLM_BUILD_COMMIT="$VLLM_COMMIT" \
   --tag "$base" "$src"
 base_id="$(docker image inspect --format '{{.Id}}' "$base")"
-docker build --platform linux/arm64 --file "$here/Dockerfile" \
-  --build-arg JJ_IMAGE="$base" --build-arg B12X_COMMIT="$B12X_COMMIT" \
+docker build --platform linux/arm64 --file "$here/Dockerfile.karmic" \
+  --build-arg KK_IMAGE="$base" --build-arg B12X_COMMIT="$B12X_COMMIT" \
   --build-arg VLLM_COMMIT="$VLLM_COMMIT" \
-  --build-arg PREFILL_HASHES="${PREFILL_HASHES:-1}" \
-  --label "local-inference.jj-base-id=$base_id" --tag "$IMAGE" "$here"
+  --label "local-inference.kk-base-id=$base_id" --tag "$IMAGE" "$here"
 [[ $(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE") == linux/arm64 ]]
 docker run --rm --gpus all --entrypoint python3 "$IMAGE" /opt/ds41/image-check.py --gpu
 docker image inspect "$IMAGE" > "$here/.build/image-inspect.json"

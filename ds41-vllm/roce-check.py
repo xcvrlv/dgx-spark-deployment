@@ -27,15 +27,13 @@ def main():
     from b12x.preparation import PreparationSession
     from vllm.utils.b12x import B12xWorkload
     workload = B12xWorkload(stage='weights', token_counts=(1,), fixed_token_counts=(1,),
-                            output_dtype=torch.bfloat16, max_tokens=16, max_seqs=8,
-                            max_model_len=393216, eager_only=True)
+                            output_dtype=torch.bfloat16, max_tokens=16, max_seqs=16,
+                            max_model_len=1048576, eager_only=True)
     units = adapter.get_b12x_preparation_units(adapter, workload)
     assert units, 'RoCE preparation provider returned no units'
-    # The pool path is what serving uses (get_b12x_session: 16). With 0 workers
-    # the functools.cache-memoized launcher factories never lower the planned
-    # programs, and a cold shared compile cache then fails closed as unavailable.
+    # Compiler processes compete with GPU allocations on GB10 unified memory.
     session = PreparationSession(device=torch.device('cuda', 0), autotune=False,
-                                 compile_workers=16)
+                                 compile_workers=int(os.environ.get('B12X_COMPILE_WORKERS', '4')))
     # The RoCE request declares a collective, so priming needs the same
     # world-coordinated rounds as serving: the coordinator authorizes it only
     # when every participant rank reported ready, and every rank stays in the
@@ -44,21 +42,22 @@ def main():
     from types import SimpleNamespace
     from vllm.v1.worker.b12x_startup import B12xPreparationCoordinator
 
-    def exchange(group):
+    def exchange():
+        # Karmic coordinates preparation over a store-backed control channel.
+        # Use torchrun's existing default store, scoped by the coordinator.
+        store = dist.distributed_c10d._get_default_store()
         def all_gather_obj(payload):
             gathered = [None] * dist.get_world_size()
-            dist.all_gather_object(gathered, payload, group=group)
+            dist.all_gather_object(gathered, payload, group=dist.group.WORLD)
             return gathered
-
-        return SimpleNamespace(
-            ranks=tuple(range(dist.get_world_size())),
-            tcp_store_group=SimpleNamespace(all_gather_obj=all_gather_obj),
-        )
+        return SimpleNamespace(ranks=tuple(range(dist.get_world_size())),
+                               tcp_store_group=SimpleNamespace(store=store,
+                                                               all_gather_obj=all_gather_obj))
 
     coordinator = B12xPreparationCoordinator(
         session,
         [(tuple(request for unit in units for request in unit.requests), False)],
-        global_rank=rank, world_group=exchange(dist.group.WORLD),
+        global_rank=rank, world_group=exchange(),
     )
     outcome = coordinator.status()
     while not outcome['done']:

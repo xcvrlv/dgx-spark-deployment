@@ -322,8 +322,26 @@ class FleetTests(unittest.TestCase):
             line.split('=', 1) for line in (ROOT/'versions.env').read_text().splitlines()
             if line.startswith('IMAGE=')
         )['IMAGE']
-        for name in ('cluster-c8.json', 'cluster-c16.json', 'cluster-r38-c8.json'):
-            self.assertEqual(fleet.load_config(ROOT / name)['image'], image, name)
+        self.assertEqual(fleet.load_config(ROOT / 'cluster-karmic-c16.json')['image'], image)
+
+    def test_karmic_uses_auto_kv_and_upstream_graph_defaults(self):
+        c = fleet.load_config(ROOT / 'cluster-karmic-c16.json')
+        args = fleet.serve_args(c, 0)
+        self.assertEqual(args[args.index('--max-model-len') + 1], '1048576')
+        self.assertEqual(args[args.index('--max-num-seqs') + 1], '16')
+        self.assertEqual(args[args.index('--max-num-batched-tokens') + 1], '4096')
+        self.assertNotIn('--kv-cache-memory-bytes', args)
+        self.assertNotIn('--compilation-config', args)
+        self.assertNotIn('--speculative-config', args)
+        env = fleet.environment(c, 0)
+        self.assertEqual(env['B12X_COMPILE_WORKERS'], '4')
+        self.assertNotIn('VLLM_USE_BREAKABLE_CUDAGRAPH', env)
+        with patch.object(fleet, 'remote', return_value='sha256:same') as remote:
+            fleet.preflight(c)
+        scripts = [call.args[2] for call in remote.call_args_list]
+        self.assertTrue(all('org.opencontainers.image.revision' in s for s in scripts))
+        self.assertTrue(all('local-inference.b12x.commit' in s for s in scripts))
+        self.assertTrue(all('local-inference.roce-collective' not in s for s in scripts))
 
     def test_checkpoint_subpath_cannot_escape_mount(self):
         for subpath in ('../outside', '/outside'):
@@ -345,6 +363,9 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(a['B12X_ROCE_HCA'], 'rocep1s0f0,roceP2p1s0f0')
         self.assertEqual(a['VLLM_ENABLE_ROCE_ALLREDUCE'], '1')
         self.assertEqual(a['VLLM_ENABLE_PCIE_ALLREDUCE'], '0')
+        # One GPU per node over RoCE: P2P has no valid path and the GB10
+        # driver exposes spurious peer mappings NCCL then probes.
+        self.assertEqual(a['NCCL_P2P_DISABLE'], '1')
 
     def test_fabric_check_gate(self):
         # fabric_check false skips the four-rank comparison inside start;

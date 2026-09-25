@@ -1,10 +1,19 @@
 # DeepSeek V4.1 Flash � JJ + b12x, four Sparks
 
-Current recipe: **[R38 / latest JJ, max-seqs8](UPSTREAM-R38.md)**, 384K context,
-DSpark5, utilization0.85, OMP2 and explicit256/128 KV pages with the sparse
-graph capture spread. Run build-image.sh and configure-r38.py. fleet.py
-defaults to cluster-r38-c8.json.
-The older c16 and c8 profiles below carry the R38 image tag.
+Current recipe: **[Karmic Kraken, 16 sequences / 1M context](UPSTREAM-KARMIC.md)**,
+4096 batched tokens and automatically sized KV cache. Run `build-image.sh` and
+`configure-karmic.py`. `fleet.py` defaults to `cluster-karmic-c16.json`.
+The older JJ profiles below retain their existing image tags.
+
+**Evaluated but not enabled: the GB10 display-reserve KV credit.** A headless
+Spark's ~2 GB firmware display reservation can back up to 1.75 GiB of KV per GPU,
+which would be 7 GiB across the four nodes at an unchanged utilization. It is off by
+default, unverified on our hardware, and costs documented read bandwidth. Read
+[DISPLAY-KV-REPORT.md](DISPLAY-KV-REPORT.md) first; it is the entry point, with the
+integration design in [DISPLAY-KV-INTEGRATION.md](DISPLAY-KV-INTEGRATION.md), the
+per-node calculator in [kv-budget.py](kv-budget.py), and the operator procedure in
+[../gb10-display-ram/runbook.md](../gb10-display-ram/runbook.md).
+
 
 ## Build and run on Spark 1
 
@@ -14,7 +23,7 @@ are required. Stop the other inference service before running GPU checks.
 
 ```bash
 cd ds41-vllm
-cp cluster-c8.json fleet.local.json
+cp cluster-karmic-c16.json fleet.local.json
 # Edit fleet.local.json for your local SSD checkpoint/cache paths and SSH key.
 # model_path is the HF repository cache ROOT, containing snapshots/ and blobs/.
 

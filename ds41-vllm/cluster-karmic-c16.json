@@ -1,5 +1,5 @@
 {
-  "image": "spark-vllm-ds41:jj-5bca5a5-b12x-92cd380-roce-v1-hashes-v1-sm121-dtype-v1-programs-v1-tuning-v3-engram-v1-collective-v1",
+  "image": "spark-vllm-ds41:kk-1794dcf-b12x-a7d7d29-roce-v1",
   "model_path": "/home/juho/.cache/huggingface/hub/DeepSeek-V4.1-Flash-MXFP4-FP4-Engram",
   "revision": "fb2764a5cf321eaa5070ca8f9e892818f477c16d",
   "cache_path": "/var/tmp/ds41-jj-cache",
@@ -29,12 +29,12 @@
   "gid_index": 3,
   "port": 8000,
   "master_port": 29511,
-  "max_model_len": 393216,
-  "max_num_seqs": 8,
+  "max_model_len": 1048576,
+  "max_num_seqs": 16,
   "max_num_batched_tokens": 4096,
-  "gpu_memory_utilization": 0.85,
-  "draft_tokens": 5,
-  "startup_timeout": 3600,
+  "gpu_memory_utilization": 0.88,
+  "draft_tokens": 0,
+  "startup_timeout": 5400,
   "model_subpath": ".",
   "roce_optimizations": {
     "inline_payload": true,
@@ -44,12 +44,11 @@
   },
   "omp_num_threads": 2,
   "swa_block_size": 128,
-  "display_kv": {
-    "enabled": false,
-    "display_mib": 1024,
-    "drm_card": "/dev/dri/card0"
-  },
   "b12x_autotune": false,
   "reduced_tuning": false,
-  "fabric_check": false
+  "fabric_check": true,
+  "upstream_branch": "dev/karmic-kraken",
+  "vllm_commit": "1794dcf18454900263e0c66711af8ea4a1283ac1",
+  "b12x_commit": "a7d7d29b2ef8869086e0ceaa787321f17544e3c9",
+  "b12x_compile_workers": 4
 }

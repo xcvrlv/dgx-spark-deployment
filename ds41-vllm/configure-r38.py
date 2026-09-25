@@ -16,7 +16,7 @@ def configure(source, output, draft_tokens=5):
     defaults = json.loads((HERE / 'cluster-r38-c8.json').read_text())
     for key in ('image', 'max_num_seqs', 'max_model_len', 'gpu_memory_utilization',
                 'max_num_batched_tokens', 'swa_block_size', 'roce_optimizations',
-                'b12x_autotune', 'reduced_tuning'):
+                'display_kv', 'b12x_autotune', 'reduced_tuning'):
         c[key] = defaults[key]
     c['draft_tokens'] = draft_tokens
     c.pop('graph_request_buckets', None)

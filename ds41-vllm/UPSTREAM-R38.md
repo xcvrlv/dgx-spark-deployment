@@ -717,3 +717,16 @@ against the new trees. GPU qualification on the four Sparks is still
 required: the matched rebase must establish that the weights-stage WO
 declaration passes, profile_run sees prepared V4.1 attention metadata, and
 the four ranks prime the RoCE collective in the same round.
+
+### Follow-up: NCCL P2P disabled in the launcher (2026-09-15)
+
+The user asked whether P2P is enabled for us; it should not be. Verified on
+the live fleet: the container env set no `NCCL_P2P_DISABLE` (NCCL's default,
+enabled, applied) and the rank-0 log showed NCCL establishing P2P paths
+(`P2P Chunksize set to 262144`). On this fleet — one GPU per node over RoCE —
+P2P has no valid inter-node path, and the GB10 unified-memory driver can
+expose spurious peer mappings that NCCL then probes, which can regress the
+serving collectives. fleet.py's `environment()` now sets
+`NCCL_P2P_DISABLE=1` (launcher-side, no image changes; a container restart
+applies it). The env test asserts the disable. 48 CPU tests pass. The
+running containers keep the old env until the next stop/start.

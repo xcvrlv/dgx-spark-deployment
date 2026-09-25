@@ -14,13 +14,18 @@ def check(versions):
             key, value = line.split('=', 1)
             pins[key] = value
     report = {'checked_at': datetime.now(timezone.utc).isoformat(), 'repositories': {}}
-    for repo, ref, key in [('vllm', 'dev/jovian-judgement', 'VLLM_COMMIT'), ('b12x', 'HEAD', 'B12X_COMMIT')]:
+    refs = [('vllm', 'vllm', 'dev/karmic-kraken', 'VLLM_COMMIT'),
+            ('vllm_jovian', 'vllm', 'dev/jovian-judgement', None),
+            ('b12x', 'b12x', 'HEAD', 'B12X_COMMIT')]
+    for name, repo, ref, key in refs:
         url = f'https://api.github.com/repos/local-inference-lab/{repo}/commits/{ref}'
         req = urllib.request.Request(url, headers={'User-Agent': 'spark-deployment-upstream-audit'})
         with urllib.request.urlopen(req, timeout=30) as response:
             commit = json.load(response)
-        report['repositories'][repo] = {'pin': pins[key], 'head': commit['sha'],
-                                        'different': pins[key] != commit['sha'], 'url': commit['html_url']}
+        report['repositories'][name] = {'pin': pins[key] if key else None,
+                                        'head': commit['sha'],
+                                        'different': pins[key] != commit['sha'] if key else None,
+                                        'url': commit['html_url']}
     return report
 
 

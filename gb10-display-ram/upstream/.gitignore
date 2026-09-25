@@ -1,0 +1,6 @@
+# Fetched upstream artifacts — AGPL-3.0-only, deliberately not vendored.
+# Run ./fetch-upstream.sh to populate this directory, verified by SHA-256.
+# Never commit these: they are separately licensed and must stay separate
+# from this repository's own licensing.
+*
+!.gitignore

@@ -1,5 +1,6 @@
 """Driver-free build checks, plus required post-build single-Spark GPU checks."""
 import argparse
+import os
 import platform
 import subprocess
 from importlib.metadata import distribution, version
@@ -16,7 +17,7 @@ from b12x.loader._native import _build as build_storage
 # vLLM (including adapters that can transitively import its CUDA extensions).
 package = Path(distribution('vllm').locate_file('vllm'))
 assert list(package.glob('_C_stable_libtorch*.so')), package
-assert version('nvidia-cutlass-dsl') == '4.6.2'
+assert version('nvidia-cutlass-dsl') == os.getenv('DS41_EXPECT_CUTLASS_DSL', '4.6.2')
 subprocess.run(['pkg-config', '--exists', 'liburing'], check=True)
 print('RoCEnante proxy:', load()._name)
 print('Compiled Engram native storage:', build_storage())
