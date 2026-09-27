@@ -48,6 +48,12 @@ pin comparison still applies. This correction handles local recipe discovery
 and build sequencing; upstream does not replace that deployment tooling.
 Evidence: `.build/upstream-check-dspark-build.json`.
 
+The read-only diagnostic addition was preceded by a live check at
+**2026-09-27 19:03:17 UTC**. All three heads above were unchanged; the comparison
+still applies and upstream does not supersede this deployment diagnostic.
+Evidence: `.build/upstream-check-prefill-diagnostics.json`. Serving pins and
+runtime patches were not changed during this follow-up.
+
 ## Memory and validation status
 
 For c16/K5, the existing context limit is 96 rows. Extending its three auxiliary
@@ -198,3 +204,82 @@ python3 fleet.py --config "$SOURCE_CONFIG" start
 The observed remaining 8k difference from target-only is around 4%. DSpark still
 requires target auxiliary outputs, context insertion and final-chunk drafting;
 these changes do not promise to eliminate all of that overhead.
+
+## Reported 128k regression and running-image verification
+
+The operator reported roughly **3,300 tok/s at 128k**, versus the earlier
+3,843 tok/s, with 8k/64k approximately unchanged. This is about 14% lower
+throughput; it is a regression report, not evidence of an optimization gain.
+Rank 0 logs from the new run contain both activation markers, graph capture
+reports of 0.22 and 0.52 GiB, and 21,552,184 KV-cache tokens. Both DSpark paths
+therefore executed on that rank. The capture figures come from separate
+startup phases; they do not measure the patch's incremental allocation or
+prove 2 GiB physical headroom. The supplied excerpt contains no preemption/OOM
+message. It does not establish the cause of the slowdown or verify other ranks.
+
+Run this from the updated deployment directory on Spark 1 **before restarting**:
+
+```bash
+python3 diagnose-prefill.py --config fleet.dspark-prefill.json \
+  --output .build/prefill-diagnostic-1.json
+```
+
+The diagnostic checks every existing serving container: running image ID versus
+the current recipe tag, image equality across ranks, vLLM/b12x pin labels,
+effective environment and arguments (including resident scales), and exact
+source validation for both the bounded-hash fix and DSpark overlay. It checks
+the installed validation scripts against this checkout before executing their
+read-only checks. It also collects activation/capture/KV/Engram/preemption log
+lines and a host RAM snapshot. It does not start containers, load the model,
+create CUDA contexts or restart anything. Six local diagnostic tests pass;
+live fleet execution remains pending because SSH from this workstation failed.
+
+A passing static check and an activation marker answer different questions:
+installed/configured correctly versus observed executing. A missing marker in
+the bounded log tail is inconclusive. Neither proves a speedup. A memory snapshot
+cannot qualify minimum headroom during prefill; use `memory-watch.py` around the
+same original benchmark, preserving corpus and warmup/cache conditions.
+
+To isolate the regression without rebuilding or needing the old recipe filename,
+derive these controls from the actual new recipe. This preserves its image,
+resident scales, batch size, utilization, thread count and graph diagnostics:
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+source = json.loads(Path('fleet.dspark-prefill.json').read_text())
+for name, skip in [('fleet.dspark-skip-only.json', True),
+                   ('fleet.dspark-both-off.json', False)]:
+    candidate = dict(source, dspark_skip_prefill_draft=skip,
+                     dspark_compact_context_graph=False)
+    with Path(name).open('x') as output:
+        json.dump(candidate, output, indent=2)
+        output.write('\n')
+PY
+```
+
+Existing files are deliberately preserved. First test only the compact graph
+disabled, with intermediate draft skipping retained:
+
+```bash
+python3 fleet.py --config fleet.dspark-prefill.json stop &&
+python3 fleet.py --config fleet.dspark-skip-only.json start
+```
+
+Repeat the same 128k benchmark several times, with the same warmup and fresh
+prompt-prefix policy. If performance recovers reproducibly, the compact graph
+path or its allocation/capture effects are implicated. If it remains low, test
+both switches off in the **same image**, retaining the bounded-hash fix:
+
+```bash
+python3 fleet.py --config fleet.dspark-skip-only.json stop &&
+python3 fleet.py --config fleet.dspark-both-off.json start
+```
+
+Recovery only in that second control implicates draft skipping or its interaction
+with the execution path. If neither recovers, compare the previous working recipe
+and image under the same conditions, and inspect memory/storage pressure and
+target prefill capture. A single recovery after restart is not enough to assign
+causality: repeat the original both-enabled case to check reproducibility.
+No further runtime optimization is justified by the current evidence alone.
