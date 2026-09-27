@@ -42,6 +42,12 @@ changes do not supersede these DSpark changes. Raw evidence is in the ignored
 See the [previous audit](PREFILL-SPARK-AUDIT.md) for linked upstream comparisons
 and the separate Engram-scale investigation.
 
+The build-helper correction was preceded by another live check at
+**2026-09-27 18:08:03 UTC**. All three heads above were unchanged, so the previous
+pin comparison still applies. This correction handles local recipe discovery
+and build sequencing; upstream does not replace that deployment tooling.
+Evidence: `.build/upstream-check-dspark-build.json`.
+
 ## Memory and validation status
 
 For c16/K5, the existing context limit is 96 rows. Extending its three auxiliary
@@ -72,6 +78,9 @@ restored context, flag combinations, hash round trips and drift rejection.
 All **56 targeted local checks** pass: 10 DSpark overlay checks, 8 prefill
 controls/headroom checks, 31 deployment checks, 4 bounded-hash checks and
 3 Karmic RoCE checks. Python syntax and patch round-trip validation pass too.
+The build-helper fix adds four passing checks for recipe discovery, missing or
+invalid inputs, failed image inspection/builds, and successful build/distribution
+ordering. These tests mock Docker; they do not establish image-build success.
 
 The child image carries **native GPU checks** derived from the pinned upstream
 suite: FP8 projections at widths 128 and 5120, rotary and cache writes, exact KV
@@ -84,30 +93,39 @@ claimed by this implementation.
 
 ## Build and run on Spark 1
 
-Run from `spark-deployment/ds41-vllm`. Use the recipe that produced your
-4,226 / 4,065 / 3,843 tok/s result as `SOURCE_CONFIG`; the filename below is the
-resident-scales recipe from the previous launch.
+Run from your `ds41-vllm` directory on Spark 1. Use the existing recipe that
+produced the 4,226 / 4,065 / 3,843 tok/s result. The earlier instructions assumed
+`fleet.prefill-scales.json`; that name was an example and may not exist on your
+machine. Do not substitute a checked-in template unless it is actually the
+recipe you used, since doing so could change paths, network or Engram settings.
+
+The build helper lists existing Karmic recipes in this directory and `.build`,
+including image, K, resident-scales setting and model path. Select your working
+recipe by number:
 
 ```bash
-SOURCE_CONFIG=fleet.prefill-scales.json
-BASE_IMAGE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"])' "$SOURCE_CONFIG")
-IMAGE=spark-vllm-ds41:kk-1794dcf-b12x-a7d7d29-dspark-prefill-v1
-
-docker build -f Dockerfile.dspark-prefill \
-  --build-arg BASE_IMAGE="$BASE_IMAGE" -t "$IMAGE" .
-
-python3 configure-dspark-prefill.py --from-config "$SOURCE_CONFIG" \
-  --output fleet.dspark-prefill.json --image "$IMAGE"
-python3 fleet.py --config fleet.dspark-prefill.json share
+python3 build-dspark-prefill.py --share
 ```
+
+If you know its filename, use `--from-config` with that actual path instead.
+`python3 build-dspark-prefill.py --list-configs` only lists candidates.
+The helper does not guess in noninteractive sessions. It validates the source
+and candidate recipe and checks that the base image exists locally, then builds
+and distributes the child image. Failed steps stop the sequence. The candidate
+`fleet.dspark-prefill.json` is published only after a successful build. An
+identical candidate may be reused on retry; a different existing file is refused.
+
+If the earlier commands failed with a missing source config, blank Docker base
+and missing output config, those are one failure chain. No successful new image
+or candidate config was produced by that sequence. Rerun with the actual recipe.
 
 This is a small source-overlay build, not a vLLM or b12x rebuild. The old image
 and recipe are retained. Run the GPU tests with the existing model stopped so
 the tests' compilation and scratch allocations do not contend with serving:
 
 ```bash
-python3 fleet.py --config "$SOURCE_CONFIG" stop
-
+IMAGE=$(python3 -c 'import json; print(json.load(open("fleet.dspark-prefill.json"))["image"])') &&
+python3 fleet.py --config fleet.dspark-prefill.json stop &&
 docker run --rm --gpus all --ipc host --entrypoint python3 "$IMAGE" \
   -m pytest -q /opt/ds41/dspark-prefill-tests
 ```
@@ -148,15 +166,19 @@ prompt generators as an isolated optimization effect.
 ## A/B and rollback
 
 Generate separate recipes from the same original configuration, with the same
-new child image, to compare each change independently:
+new child image, to compare each change independently. Set `SOURCE_CONFIG` to
+the actual working recipe selected earlier; it is not exported by the helper.
 
 ```bash
+IMAGE=$(python3 -c 'import json; print(json.load(open("fleet.dspark-prefill.json"))["image"])') &&
+read -r -p "Original working recipe path: " SOURCE_CONFIG &&
+test -r "$SOURCE_CONFIG" &&
 python3 configure-dspark-prefill.py --from-config "$SOURCE_CONFIG" \
   --output fleet.dspark-control.json --image "$IMAGE" \
-  --skip-prefill-draft off --compact-context-graph off
+  --skip-prefill-draft off --compact-context-graph off &&
 python3 configure-dspark-prefill.py --from-config "$SOURCE_CONFIG" \
   --output fleet.dspark-skip.json --image "$IMAGE" \
-  --skip-prefill-draft on --compact-context-graph off
+  --skip-prefill-draft on --compact-context-graph off &&
 python3 configure-dspark-prefill.py --from-config "$SOURCE_CONFIG" \
   --output fleet.dspark-graph.json --image "$IMAGE" \
   --skip-prefill-draft off --compact-context-graph on
@@ -167,7 +189,9 @@ existing recipes. Setting either JSON switch false disables that optimization
 on the next restart. To fully roll back to the previously measured deployment:
 
 ```bash
-python3 fleet.py --config fleet.dspark-prefill.json stop
+read -r -p "Original working recipe path: " SOURCE_CONFIG
+test -r "$SOURCE_CONFIG" &&
+python3 fleet.py --config fleet.dspark-prefill.json stop &&
 python3 fleet.py --config "$SOURCE_CONFIG" start
 ```
 
