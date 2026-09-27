@@ -33,7 +33,7 @@
   "max_num_seqs": 16,
   "max_num_batched_tokens": 4096,
   "gpu_memory_utilization": 0.88,
-  "draft_tokens": 0,
+  "draft_tokens": 5,
   "startup_timeout": 5400,
   "model_subpath": ".",
   "roce_optimizations": {

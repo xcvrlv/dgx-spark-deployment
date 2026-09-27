@@ -40,15 +40,22 @@ def load_config(path):
     assert len(c['hcas']) == 2
     assert type(c.get('reduced_tuning', True)) is bool
     assert type(c.get('b12x_autotune', False)) is bool
+    assert type(c.get('torch_profile', False)) is bool
+    for key in ('engram_resident_scales', 'graph_memory_debug'):
+        assert type(c.get(key, False)) is bool, f'{key} must be a boolean'
+        if c.get(key, False):
+            assert c.get('upstream_branch') == 'dev/karmic-kraken', f'{key} requires the audited Karmic profile'
     assert c.get('upstream_branch', 'dev/jovian-judgement') in (
         'dev/jovian-judgement', 'dev/karmic-kraken')
     if c.get('upstream_branch') == 'dev/karmic-kraken':
         assert type(c.get('b12x_compile_workers')) is int and 1 <= c['b12x_compile_workers'] <= 16
+        assert type(c.get('b12x_preparation_trace', False)) is bool
+        assert type(c.get('b12x_hang_dump', False)) is bool
         for key in ('vllm_commit', 'b12x_commit'):
             assert isinstance(c.get(key), str) and len(c[key]) == 40
         assert not display_kv(c), 'Karmic image has no display-KV overlay'
         assert not c.get('reduced_tuning', False), 'Karmic image has no tuning overlay'
-        assert 'graph_request_buckets' not in c and not c.get('torch_profile', False)
+        assert 'graph_request_buckets' not in c
     assert c['max_num_seqs'] in (8, 16), 'Supported profiles: c8 and c16'
     assert set(c.get('roce_optimizations', {})) <= set(ROCE_OPTIONS)
     assert all(type(v) is bool for v in c.get('roce_optimizations', {}).values())
@@ -132,6 +139,12 @@ def environment(c, rank):
     if c.get('upstream_branch') == 'dev/karmic-kraken':
         # Compilation workers share physical RAM with the GPU on GB10.
         environment['B12X_COMPILE_WORKERS'] = str(c['b12x_compile_workers'])
+        if c.get('b12x_preparation_trace', False):
+            environment['B12X_PREPARATION_TRACE_DIR'] = '/cache/b12x-preparation-trace'
+        if c.get('b12x_hang_dump', False):
+            environment['B12X_HANG_DUMP'] = '1'
+        if c.get('graph_memory_debug', False):
+            environment['VLLM_DEBUG_GRAPH_MEMORY_ACCOUNTING'] = '1'
     else:
         environment['VLLM_USE_BREAKABLE_CUDAGRAPH'] = '0'
     display = display_kv(c)
@@ -185,6 +198,11 @@ export {DISPLAY_KV_GID_NAME}="$(stat -c '%g' {card})"
 
 
 def serve_args(c, rank):
+    engram = {'cpu_offload': False, 'table_memory': 'disk'}
+    if c.get('engram_resident_scales', False):
+        # Upstream retains exact E8M0 bytes: about 1.43 GiB/rank at TP4.
+        # Opt-in only; this competes with KV and graphs in GB10's shared RAM.
+        engram['disk_resident_scales'] = True
     cmd = ['vllm', 'serve', checkpoint_path(c, '/checkpoint'),
            '--served-model-name', MODEL, '--host', '0.0.0.0', '--port', str(c['port']),
            '--distributed-executor-backend', 'mp', '--nnodes', '4', '--node-rank', str(rank),
@@ -193,7 +211,7 @@ def serve_args(c, rank):
            '--dtype', 'bfloat16', '--load-format', 'safetensors', '--safetensors-load-strategy', 'lazy',
            '--attention-backend', 'B12X', '--linear-backend', 'b12x', '--moe-backend', 'b12x',
            '--block-size', '256', '--kv-cache-dtype', 'fp8',
-           '--engram-config', json.dumps({'cpu_offload': False, 'table_memory': 'disk'}),
+           '--engram-config', json.dumps(engram),
            '--gpu-memory-utilization', str(c['gpu_memory_utilization']),
            '--max-model-len', str(c['max_model_len']), '--max-num-seqs', str(c['max_num_seqs']),
            '--max-num-batched-tokens', str(c['max_num_batched_tokens']),
@@ -389,7 +407,10 @@ def main():
     parser.add_argument('--config', default=str(HERE / 'cluster-karmic-c16.json'))
     parser.add_argument('action', choices=['plan', 'share', 'preflight', 'fabric', 'start', 'smoke', 'status', 'logs', 'stop'])
     parser.add_argument('--rank', type=int, choices=range(4), default=0)
+    parser.add_argument('--follow', action='store_true', help='Stream new container logs (logs action only)')
     args = parser.parse_args()
+    if args.follow and args.action != 'logs':
+        parser.error('--follow requires the logs action')
     c = load_config(args.config)
     if args.action == 'plan':
         for rank in range(4):
@@ -448,7 +469,10 @@ def main():
     elif args.action == 'smoke':
         smoke(c)
     elif args.action == 'logs':
-        subprocess.run(ssh(c, args.rank) + ['docker', 'logs', '--tail', '200', f'{NAME}-{args.rank}'], check=True)
+        command = ['docker', 'logs', '--tail', '200']
+        if args.follow:
+            command.append('--follow')
+        subprocess.run(ssh(c, args.rank) + command + [f'{NAME}-{args.rank}'], check=True)
     else:
         for rank in range(4):
             if args.action == 'stop':

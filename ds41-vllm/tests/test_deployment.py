@@ -324,7 +324,7 @@ class FleetTests(unittest.TestCase):
         )['IMAGE']
         self.assertEqual(fleet.load_config(ROOT / 'cluster-karmic-c16.json')['image'], image)
 
-    def test_karmic_uses_auto_kv_and_upstream_graph_defaults(self):
+    def test_karmic_uses_dspark_k5_auto_kv_and_upstream_graph_defaults(self):
         c = fleet.load_config(ROOT / 'cluster-karmic-c16.json')
         args = fleet.serve_args(c, 0)
         self.assertEqual(args[args.index('--max-model-len') + 1], '1048576')
@@ -332,9 +332,18 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(args[args.index('--max-num-batched-tokens') + 1], '4096')
         self.assertNotIn('--kv-cache-memory-bytes', args)
         self.assertNotIn('--compilation-config', args)
-        self.assertNotIn('--speculative-config', args)
+        spec = json.loads(args[args.index('--speculative-config') + 1])
+        self.assertEqual(spec['method'], 'dspark')
+        self.assertEqual(spec['num_speculative_tokens'], 5)
+        self.assertTrue(spec['enable_adaptive_verification'])
         env = fleet.environment(c, 0)
         self.assertEqual(env['B12X_COMPILE_WORKERS'], '4')
+        self.assertNotIn('B12X_PREPARATION_TRACE_DIR', env)
+        self.assertNotIn('B12X_HANG_DUMP', env)
+        traced = fleet.environment(dict(c, b12x_preparation_trace=True), 0)
+        self.assertEqual(traced['B12X_PREPARATION_TRACE_DIR'], '/cache/b12x-preparation-trace')
+        dumped = fleet.environment(dict(c, b12x_hang_dump=True), 0)
+        self.assertEqual(dumped['B12X_HANG_DUMP'], '1')
         self.assertNotIn('VLLM_USE_BREAKABLE_CUDAGRAPH', env)
         with patch.object(fleet, 'remote', return_value='sha256:same') as remote:
             fleet.preflight(c)

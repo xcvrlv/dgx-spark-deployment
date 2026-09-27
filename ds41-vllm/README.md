@@ -5,6 +5,11 @@ Current recipe: **[Karmic Kraken, 16 sequences / 1M context](UPSTREAM-KARMIC.md)
 `configure-karmic.py`. `fleet.py` defaults to `cluster-karmic-c16.json`.
 The older JJ profiles below retain their existing image tags.
 
+For the current prefill investigation, read [Spark prefill audit](PREFILL-SPARK-AUDIT.md):
+4096-token graph eligibility, optional 1.43 GiB/rank resident Engram scales,
+the 2 GiB headroom qualification, and the isolated bounded-hash child image.
+These candidates do not change the default serving profile.
+
 **Evaluated but not enabled: the GB10 display-reserve KV credit.** A headless
 Spark's ~2 GB firmware display reservation can back up to 1.75 GiB of KV per GPU,
 which would be 7 GiB across the four nodes at an unchanged utilization. It is off by

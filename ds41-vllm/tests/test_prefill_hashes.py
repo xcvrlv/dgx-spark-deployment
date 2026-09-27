@@ -12,15 +12,19 @@ spec = importlib.util.spec_from_file_location('prefill_hashes', ROOT / 'patches/
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
 SOURCE = Path(os.environ.get('DS41_VLLM_SOURCE', ROOT.parent / 'tmp/jj-audit/local-inference-lab-vllm-5bca5a5/vllm'))
+KARMIC_SOURCE = Path(os.environ.get('DS41_KARMIC_VLLM_SOURCE',
+    ROOT / '.build/upstream/vllm-1794dcf18454900263e0c66711af8ea4a1283ac1/vllm'))
 
 
 @unittest.skipUnless(SOURCE.is_dir(), 'set DS41_VLLM_SOURCE to the pinned vllm package')
 class PrefillHashTests(unittest.TestCase):
+    source = SOURCE
+
     def test_hash_guard_apply_reapply_revert_and_drift(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / p.RELATIVE
             target.parent.mkdir(parents=True)
-            original = (SOURCE / p.RELATIVE).read_bytes()
+            original = (self.source / p.RELATIVE).read_bytes()
             target.write_bytes(original)
             p.patch(directory)
             p.patch(directory)
@@ -32,8 +36,8 @@ class PrefillHashTests(unittest.TestCase):
                 p.patch(directory)
 
     def test_real_cache_method_equivalence_and_copy_work(self):
-        text = (SOURCE / p.RELATIVE).read_text()
-        utils = ast.parse((SOURCE / 'v1/core/kv_cache_utils.py').read_text())
+        text = (self.source / p.RELATIVE).read_text()
+        utils = ast.parse((self.source / 'v1/core/kv_cache_utils.py').read_text())
         view = next(n for n in utils.body if isinstance(n, ast.ClassDef) and n.name == 'BlockHashListWithBlockSize')
         scope = {}
         exec('from __future__ import annotations\nfrom typing import overload\n' + ast.unparse(view), scope)
@@ -81,6 +85,13 @@ class PrefillHashTests(unittest.TestCase):
                     self.assertEqual(before, after)
                     self.assertEqual(old_work, 74496)
                     self.assertEqual(new_work, 1536)
+
+
+@unittest.skipUnless(KARMIC_SOURCE.is_dir(), 'set DS41_KARMIC_VLLM_SOURCE to the pinned package')
+class KarmicPrefillHashTests(PrefillHashTests):
+    source = KARMIC_SOURCE
+    # Do not inherit the legacy fixture's availability gate.
+    __unittest_skip__ = not KARMIC_SOURCE.is_dir()
 
 
 if __name__ == '__main__':

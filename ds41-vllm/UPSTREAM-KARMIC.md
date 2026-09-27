@@ -8,6 +8,10 @@
 | [vLLM `dev/jovian-judgement`](https://github.com/local-inference-lab/vllm/commit/8e1f1e587f8d24faf606f334a1c4bdaaa6bd4368) | `8e1f1e587f8d24faf606f334a1c4bdaaa6bd4368` | Required legacy-head comparison; no JJ source is imported. The previous image pin was `5bca5a58d970216bd46be82575e824c6e424c465`. |
 | [b12x `master`](https://github.com/local-inference-lab/b12x/commit/a7d7d29b2ef8869086e0ceaa787321f17544e3c9) | `a7d7d29b2ef8869086e0ceaa787321f17544e3c9` | Kernel and RoCEnante runtime. Previous pin was `92cd3800932539c947c9a8e06123fe5f36c9eae4`. |
 
+Rechecked these three upstream heads on 2026-09-26; they still match the pins.
+Upstream has not superseded the preparation diagnostics or resolved the
+CUDA-free-memory race budget on unified memory.
+
 The new [Dockerfile](Dockerfile.karmic) copies only the local RoCE transport
 patch and its native probe. Karmic/b12x already contain the prior RoCE dtype
 name fix, attached program metadata and world-coordinated collective
@@ -51,9 +55,9 @@ vLLM profiles startup allocations and sizes KV automatically at
 
 The target limits are **16 sequences**, **1,048,576 tokens per sequence** and
 **4,096 batched tokens**. These are admission limits, not a claim that sixteen
-simultaneous 1M-token requests fit the available KV pages. This profile starts
-without speculative drafting and lets Karmic choose its graph capture defaults.
-Capacity and throughput require measurement on the four Spark nodes.
+simultaneous 1M-token requests fit the available KV pages. This profile uses
+DSpark K5 with adaptive verification and lets Karmic choose its graph capture
+defaults. Capacity and throughput require measurement on the four Spark nodes.
 
 ## Build and start
 
@@ -78,7 +82,55 @@ python3 fleet.py --config fleet.karmic.json preflight
 python3 fleet.py --config fleet.karmic.json start
 ```
 
-For a fresh fleet config, use `cluster-karmic-c16.json`. The migration helper
+While `start` is waiting for the model, use another terminal on Spark 1 to
+follow logs for any rank (0–3). Press Ctrl-C to stop following; the serving
+container keeps running.
+
+```bash
+python3 fleet.py --config fleet.karmic.json logs --rank 0 --follow
+```
+
+### Diagnose b12x autotune startup
+
+The pinned b12x preparation session first selects a configuration, then plans
+and submits compilation, primes the selected plan, and only races candidates
+for requests with multiple configurations. `norm.vision` has one fixed
+configuration, so a repeated `selecting norm.vision` line with zero prepared
+and zero compiled candidates is before its GPU benchmark. The dashboard shows
+only global rank 0 and does not identify the active request within that family.
+
+For the next start, add `"b12x_preparation_trace": true` and
+`"b12x_hang_dump": true` to `fleet.karmic.json`. These only enable upstream
+diagnostics. The trace writes `job-*.jsonl` and `coordinator-*.jsonl` in the
+host cache's `b12x-preparation-trace` directory. To capture a stalled worker's
+Python stacks on Spark 1, find its current PID and signal that PID inside the
+container:
+
+```bash
+docker exec ds41-jj-0 ps -eo pid,cmd | grep 'VLLM::Worker_TP0'
+WORKER_PID=$(docker exec ds41-jj-0 ps -eo pid,cmd | awk '$2 == "VLLM::Worker_TP0" { print $1; exit }')
+docker exec ds41-jj-0 kill -USR1 "$WORKER_PID"
+docker logs ds41-jj-0 --since 2m 2>&1 | tail -n 1000
+docker exec ds41-jj-0 sh -c 'tail -n 5 /cache/b12x-preparation-trace/job-*.jsonl'
+```
+
+Only send `SIGUSR1` if `b12x_hang_dump` was enabled when the container started.
+The stack dump is written to the container log. The trace records request
+names and accumulated time in `compile_plan`, `cache_lookup`, and other steps.
+
+The later candidate race uses half of `cuda.mem_get_info().free` as its default
+temporary-memory budget. On GB10 that can miss CPU and compiler-worker use of
+the same physical memory. Lowering `gpu_memory_utilization` can increase this
+race budget if it leaves more CUDA memory free. In the weights stage shown
+above, preparation precedes KV memory profiling, so changing the KV utilization
+limit may have no effect on that stage at all. The race budget does not affect
+the fixed `norm.vision` selection. A smaller race budget still visits every
+candidate, but changes the race batches and may change the winning kernel;
+compare measured inference latency before adopting a cap.
+
+For a fresh fleet config, use `cluster-karmic-c16.json`. If `fleet.karmic.json`
+was generated before the K5 update, set its `draft_tokens` to `5` before
+sharing or starting. The migration helper
 keeps operator paths, checkpoint revision and node addresses while replacing
 the serving limits and removing old experiment controls. `preflight` checks
 both exact source revision labels, both RoCE HCAs, GPU imports, disk Engram

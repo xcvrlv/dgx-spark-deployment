@@ -1,0 +1,9 @@
+# Optional child image; leaves the default serving image and pins unchanged.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER root
+COPY patches/prefill_hashes.py /opt/ds41/patches/prefill_hashes.py
+RUN package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")" \
+    && python3 /opt/ds41/patches/prefill_hashes.py "$package" \
+    && python3 /opt/ds41/patches/prefill_hashes.py "$package" --check
+LABEL local-inference.prefill-hash-overlay="ds41-bounded-hashes-v1"
