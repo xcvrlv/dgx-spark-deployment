@@ -18,6 +18,10 @@ ROCE_OPTIONS = {
     'skip_empty_cq': 'B12X_ROCE_SKIP_EMPTY_CQ',
     'lazy_payload_init': 'B12X_ROCE_LAZY_PAYLOAD_INIT',
 }
+DSPARK_PREFILL_OPTIONS = {
+    'dspark_skip_prefill_draft': 'DS41_SKIP_PREFILL_DRAFT',
+    'dspark_compact_context_graph': 'DS41_COMPACT_CONTEXT_GRAPH',
+}
 # The display reserve is firmware memory the OS cannot use, so it is credited to
 # the KV budget rather than reached through gpu_memory_utilization. The DRM group
 # is resolved on the node; this token is shell-expanded in plan(), not quoted.
@@ -41,10 +45,16 @@ def load_config(path):
     assert type(c.get('reduced_tuning', True)) is bool
     assert type(c.get('b12x_autotune', False)) is bool
     assert type(c.get('torch_profile', False)) is bool
-    for key in ('engram_resident_scales', 'graph_memory_debug'):
+    for key in ('engram_resident_scales', 'graph_memory_debug', *DSPARK_PREFILL_OPTIONS):
         assert type(c.get(key, False)) is bool, f'{key} must be a boolean'
         if c.get(key, False):
             assert c.get('upstream_branch') == 'dev/karmic-kraken', f'{key} requires the audited Karmic profile'
+    if any(c.get(key, False) for key in DSPARK_PREFILL_OPTIONS):
+        assert c['draft_tokens'] > 0, 'DSpark prefill optimizations require speculative decoding'
+        assert c.get('vllm_commit') == '1794dcf18454900263e0c66711af8ea4a1283ac1', 'DSpark prefill overlay requires the audited vLLM pin'
+        assert c.get('b12x_commit') == 'a7d7d29b2ef8869086e0ceaa787321f17544e3c9', 'DSpark prefill overlay requires the audited b12x pin'
+    if c.get('dspark_compact_context_graph', False):
+        assert c['max_num_batched_tokens'] >= 128, 'Compact context graph requires a 128-row buffer'
     assert c.get('upstream_branch', 'dev/jovian-judgement') in (
         'dev/jovian-judgement', 'dev/karmic-kraken')
     if c.get('upstream_branch') == 'dev/karmic-kraken':
@@ -139,6 +149,9 @@ def environment(c, rank):
     if c.get('upstream_branch') == 'dev/karmic-kraken':
         # Compilation workers share physical RAM with the GPU on GB10.
         environment['B12X_COMPILE_WORKERS'] = str(c['b12x_compile_workers'])
+        # Explicit zeros let either optimization be rolled back independently.
+        environment.update({env: str(int(c.get(key, False)))
+                            for key, env in DSPARK_PREFILL_OPTIONS.items()})
         if c.get('b12x_preparation_trace', False):
             environment['B12X_PREPARATION_TRACE_DIR'] = '/cache/b12x-preparation-trace'
         if c.get('b12x_hang_dump', False):
@@ -278,6 +291,9 @@ def preflight(c):
         if any(c.get('roce_optimizations', {}).values()):
             script += shlex.join(['docker', 'image', 'inspect', '--format',
                                   '{{index .Config.Labels "local-inference.roce-overlay"}}', c['image']]) + " | grep -qx ds41-roce-v1\n"
+        if any(c.get(key, False) for key in DSPARK_PREFILL_OPTIONS):
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.dspark-prefill-overlay"}}', c['image']]) + " | grep -qx ds41-dspark-prefill-v1\n"
         if c.get('reduced_tuning', True):
             script += shlex.join(['docker', 'image', 'inspect', '--format',
                                   '{{index .Config.Labels "local-inference.b12x-tuning"}}', c['image']]) + " | grep -qx v1\n"

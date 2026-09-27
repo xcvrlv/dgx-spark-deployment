@@ -1,0 +1,14 @@
+# Small child image; accepts the existing bounded-hash/resident-scale deployment.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER root
+COPY patches/prefill_hashes.py patches/dspark_prefill.py patches/dspark_prefill_runtime.py /opt/ds41/patches/
+RUN package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")" \
+    && python3 /opt/ds41/patches/prefill_hashes.py "$package" \
+    && python3 /opt/ds41/patches/dspark_prefill.py "$package" \
+    && python3 /opt/ds41/patches/prefill_hashes.py "$package" --check \
+    && python3 /opt/ds41/patches/dspark_prefill.py "$package" --check
+COPY gpu-tests/ /opt/ds41/dspark-prefill-tests/
+ENV DS41_SKIP_PREFILL_DRAFT=0 DS41_COMPACT_CONTEXT_GRAPH=0
+LABEL local-inference.prefill-hash-overlay="ds41-bounded-hashes-v1" \
+      local-inference.dspark-prefill-overlay="ds41-dspark-prefill-v1"

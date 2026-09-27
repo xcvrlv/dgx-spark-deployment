@@ -1,0 +1,8 @@
+*
+!Dockerfile.dspark-prefill
+!patches/
+!patches/prefill_hashes.py
+!patches/dspark_prefill.py
+!patches/dspark_prefill_runtime.py
+!gpu-tests/
+!gpu-tests/*.py

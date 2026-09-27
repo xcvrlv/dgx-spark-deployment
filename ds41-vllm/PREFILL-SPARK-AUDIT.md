@@ -1,5 +1,9 @@
 # Spark prefill audit — 2026-09-27
 
+**Follow-up:** the subsequent [DSpark prefill implementation](DSPARK-PREFILL.md)
+adds two optional source changes after the improved benchmark result. This
+document records the preceding investigation and its original scope.
+
 **Recommendation:** retain the Karmic 4096-token chunk and existing decode
 configuration. First verify that its existing prefill graph is replaying, then
 A/B upstream resident Engram scales (about **1.431 GiB per Spark**). A persistent

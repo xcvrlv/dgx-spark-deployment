@@ -10,6 +10,10 @@ For the current prefill investigation, read [Spark prefill audit](PREFILL-SPARK-
 the 2 GiB headroom qualification, and the isolated bounded-hash child image.
 These candidates do not change the default serving profile.
 
+The follow-up [DSpark prefill overlay](DSPARK-PREFILL.md) implements optional
+intermediate-chunk draft skipping and 128-row context capture, with build,
+GPU validation, memory qualification and independent rollback instructions.
+
 **Evaluated but not enabled: the GB10 display-reserve KV credit.** A headless
 Spark's ~2 GB firmware display reservation can back up to 1.75 GiB of KV per GPU,
 which would be 7 GiB across the four nodes at an unchanged utilization. It is off by
