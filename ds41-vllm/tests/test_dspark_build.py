@@ -23,7 +23,7 @@ class BuildDsparkPrefillTests(unittest.TestCase):
         self.directory = Path(self.temp.name)
         self.source = self.directory / 'actual launch.json'
         self.output = self.directory / 'candidate.json'
-        self.config = json.loads((ROOT / 'cluster-karmic-c16.json').read_text())
+        self.config = json.loads((ROOT / 'cluster-karmic-20260925.json').read_text())
         self.config.update(image='operator:working-prefill', engram_resident_scales=True)
         self.source.write_text(json.dumps(self.config))
         self.quiet = patch('sys.stdout', new_callable=io.StringIO)

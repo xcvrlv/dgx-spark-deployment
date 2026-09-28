@@ -25,6 +25,12 @@ ENV_KEYS = (
     'DS41_SKIP_PREFILL_DRAFT', 'DS41_COMPACT_CONTEXT_GRAPH',
     'VLLM_USE_V2_MODEL_RUNNER', 'VLLM_DEBUG_GRAPH_MEMORY_ACCOUNTING',
     'VLLM_USE_BREAKABLE_CUDAGRAPH', 'OMP_NUM_THREADS',
+    'DS41_H2D_STAGING', 'DS41_DEFER_AUTOTUNE_GC', 'DS41_BOUNDED_PREFIX_HASHES',
+    'DS41_SHM_BUSY_LOOP_S', 'DS41_PREFILL_8192_GRAPH',
+    'VLLM_DS41_ENGRAM_OVERLAP', 'VLLM_DS41_MARKOV_NVFP4',
+    'VLLM_DS41_DRAFT_NVFP4_HEAD',
+    'VLLM_DS41_L2_PREFETCH',
+    'DS41_MOE_COALESCE_BARRIERS',
 )
 ARG_KEYS = (
     '--engram-config', '--speculative-config', '--max-num-batched-tokens',
@@ -54,6 +60,29 @@ if all(item['matches_checkout'] for item in result['patch_files'].values()):
             result['patch_checks'][name] = 'passed'
         except Exception as exc:
             result['patch_checks'][name] = str(exc)
+print(json.dumps(result))
+'''
+
+# The 8192 graph overlay changes the already-patched model runner. Verify the
+# complete composition rather than asking an earlier layer to match its output.
+BUNDLE_PROBE = r'''
+import hashlib, json, runpy
+from importlib.metadata import distribution
+from pathlib import Path
+expected = EXPECTED_HASHES
+result = {'patch_files': {}, 'patch_checks': {}}
+for relative, digest in expected.items():
+    path = Path('/opt/ds41') / relative
+    actual = hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest() if path.is_file() else None
+    result['patch_files'][relative] = {'sha256': actual, 'matches_checkout': actual == digest}
+if all(item['matches_checkout'] for item in result['patch_files'].values()):
+    try:
+        roots = {name: distribution(name).locate_file(name) for name in ('vllm', 'b12x')}
+        runpy.run_path('/opt/ds41/performance-check.py')['check'](
+            roots, '/opt/ds41/performance-manifest.json')
+        result['patch_checks']['performance_bundle'] = 'passed'
+    except Exception as exc:
+        result['patch_checks']['performance_bundle'] = str(exc)
 print(json.dumps(result))
 '''
 
@@ -120,6 +149,13 @@ def probe_script(config, rank):
                                   .replace(b'\r\n', b'\n')).hexdigest()
                for name in PATCH_FILES}
     container_probe = CONTAINER_PROBE.replace('EXPECTED_HASHES', repr(digests))
+    if fleet.source_pins(config) == fleet.LATEST_PINS:
+        digests = {relative: hashlib.sha256((ROOT / source).read_bytes()
+                                          .replace(b'\r\n', b'\n')).hexdigest()
+                   for relative, source in (
+                       ('performance-check.py', 'performance-check.py'),
+                       ('performance-manifest.json', 'patches/performance-manifest.json'))}
+        container_probe = BUNDLE_PROBE.replace('EXPECTED_HASHES', repr(digests))
     header = (f'ENV_KEYS = {ENV_KEYS!r}\nARG_KEYS = {ARG_KEYS!r}\n'
               f'MARKERS = {MARKERS!r}\nCONTAINER_PROBE = {container_probe!r}\n')
     command = shlex.join(['python3', '-', f'{fleet.NAME}-{rank}', config['image']])
@@ -144,7 +180,9 @@ def assess(config, rank, data):
         for label, expected in (
             ('org.opencontainers.image.revision', config.get('vllm_commit')),
             ('local-inference.b12x.commit', config.get('b12x_commit')),
-            ('local-inference.prefill-hash-overlay', 'ds41-bounded-hashes-v1'),
+            (('local-inference.performance-bundle', 'ds41-performance-v1')
+             if fleet.source_pins(config) == fleet.LATEST_PINS else
+             ('local-inference.prefill-hash-overlay', 'ds41-bounded-hashes-v1')),
             ('local-inference.dspark-prefill-overlay', 'ds41-dspark-prefill-v1'),
         ):
             if expected is not None and labels.get(label) != expected:
@@ -171,10 +209,13 @@ def assess(config, rank, data):
             if actual != expected:
                 issues.append(f'Runtime argument mismatch: {key}')
     source = data.get('source', {})
-    for name in PATCH_FILES:
+    latest = fleet.source_pins(config) == fleet.LATEST_PINS
+    files = ('performance-check.py', 'performance-manifest.json') if latest else PATCH_FILES
+    checks = ('performance_bundle',) if latest else ('prefill_hashes.py', 'dspark_prefill.py')
+    for name in files:
         if not source.get('patch_files', {}).get(name, {}).get('matches_checkout'):
             issues.append(f'Installed patch file missing or differs from checkout: {name}')
-    for name in ('prefill_hashes.py', 'dspark_prefill.py'):
+    for name in checks:
         if source.get('patch_checks', {}).get(name) != 'passed':
             issues.append(f'Source validation did not pass: {name}')
     if data.get('memory', {}).get('available_gib', 2) < 2:

@@ -1,0 +1,20 @@
+DS41 optional performance bundle, 2026-09-28
+
+sparkring_performance.py and sparkring_gc_runtime.py adapt the host-copy
+staging fix and automatic-GC deferral from FujitsuPolycom/sparkring at
+8b152d65c701f557f62ae6a9a1c3db90771c1df3:
+  runtime/images/derive_staging_fix.py
+  integrations/b12x/patches/stream_gate_gc.py
+Copyright 2026 SparkRing contributors. Licensed under Apache License 2.0;
+the accompanying LICENSE.sparkring contains the license text. Local changes
+add independent runtime switches, exact source guards, nested/concurrent
+GC restoration, and release the stream gate on enqueue errors.
+
+knapcio_decode_runtime.py is an independent native-b12x implementation of
+the adjacent-barrier-fill opportunity documented by knapcio's
+DeepSeek-V4.1-Flash-4x-DGX-Spark-TP4 at
+e9ec61d276c467c747777ed8b9671dac80455954. No SGLang adapter source is copied.
+It checks the native b12x allocator's exact alignment boundary and retains
+the original two-fill fallback. It is licensed under Apache License 2.0.
+
+Existing vLLM and b12x files retain their upstream license and copyright.

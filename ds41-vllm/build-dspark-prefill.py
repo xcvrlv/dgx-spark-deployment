@@ -27,6 +27,7 @@ def discover(directory=HERE):
             config = fleet.load_config(path)
             if (config.get('upstream_branch') == 'dev/karmic-kraken'
                     and config['draft_tokens'] > 0
+                    and fleet.source_pins(config) != fleet.LATEST_PINS
                     and config['image'] != DEFAULT_IMAGE):
                 candidates.append((path, config))
         except (OSError, ValueError, KeyError, AssertionError, TypeError):

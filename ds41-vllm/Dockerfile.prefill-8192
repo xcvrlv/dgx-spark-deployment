@@ -1,0 +1,10 @@
+# Opt-in child of the qualified bounded-autotune image.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER root
+COPY patches/prefill_8192_graph.py /opt/ds41/patches/
+RUN vllm_package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")" \
+    && python3 /opt/ds41/patches/prefill_8192_graph.py "$vllm_package" \
+    && python3 /opt/ds41/patches/prefill_8192_graph.py "$vllm_package" --check
+ENV DS41_PREFILL_8192_GRAPH=0
+LABEL local-inference.prefill-8192-graph="ds41-prefill-8192-graph-v2"

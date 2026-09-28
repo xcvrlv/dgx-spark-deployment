@@ -1,0 +1,166 @@
+{
+  "schema": "ds41-performance-source/v1",
+  "checked_at": "2026-09-28",
+  "vllm_commit": "502d6cb5acd2ba2a62ecf58497be558c9d86089f",
+  "b12x_commit": "d44247b6171f7c2f9787341ae884b537887d7df9",
+  "sparkring_commit": "8b152d65c701f557f62ae6a9a1c3db90771c1df3",
+  "files": [
+    {
+      "tree": "b12x",
+      "path": "comm/roce/_roce_proxy.c",
+      "source_sha256": "81a21aab6a202a86a8a2cbc4fec727506bfb738759eb6d854c50c0c9a9121b64",
+      "sha256": "ec54c91b721366ab8f4ab47759e5c9863a446041278d0c7bf6dd81051ebf99c3"
+    },
+    {
+      "tree": "b12x",
+      "path": "comm/roce/roce_oneshot.py",
+      "source_sha256": "572429e67e0cd63c04854797fe6c27eca0ec1afe4ab24fc2b4e7f971f67e7f01",
+      "sha256": "715c1075ffa60ddbdd185ea00775102a2a070296fcbcda6f8a9171f1c44d9f2a"
+    },
+    {
+      "tree": "b12x",
+      "path": "moe/fused_moe/_impl.py",
+      "source_sha256": "41bf14ea26f8f736670ade8df536d663b3b439870dc87a6268c50403c04afdc1",
+      "sha256": "8479a2881337122e5c3fb381b87a6cf6d4f752ffd080a598f0220530df1d4dd6"
+    },
+    {
+      "tree": "b12x",
+      "path": "moe/fused_moe/ds41_barriers.py",
+      "source_sha256": null,
+      "sha256": "fee02c21f9a055954b40508ff268b0c4b1b46f80addb06ed3216227ac6dad9b9"
+    },
+    {
+      "tree": "b12x",
+      "path": "preparation/_measurement.py",
+      "source_sha256": "6eafe4fa0f6983de932ed5ae7e778d9907a30f37232465fa37f35ec2e5066850",
+      "sha256": "869dbd6ee31aa6346ec557030873d0101859bbbd78712d483db8a36638985c21"
+    },
+    {
+      "tree": "b12x",
+      "path": "preparation/_memory.py",
+      "source_sha256": "81ec9916a1dc3c8801ee0ff8987ccdc57914264b0687c3560aa304fd3cdd6e49",
+      "sha256": "1908b48f9d15315c941a52ba76e8f749fb27ea6cc56114ffbcb4dcc99881fd67"
+    },
+    {
+      "tree": "b12x",
+      "path": "preparation/ds41_gc.py",
+      "source_sha256": null,
+      "sha256": "45457e0879c7e435730b770cd18ab51dbcf6b9fee687c815f0d1379963d0ad66"
+    },
+    {
+      "tree": "b12x",
+      "path": "preparation/ds41_tuning.py",
+      "source_sha256": null,
+      "sha256": "d19c7f51c9c40e9be75ee419a27809d046f83a42eef6859c7136093eaa13dcf2"
+    },
+    {
+      "tree": "b12x",
+      "path": "preparation/session.py",
+      "source_sha256": "e729ef26952d485de719a3359d36ed768ebe06facab102002e53f5b32a9d530c",
+      "sha256": "3395c3ca4475778992a448017923c2ff13c96985c6f647ef48851b2c202cb040"
+    },
+    {
+      "tree": "vllm",
+      "path": "config/engram.py",
+      "source_sha256": "913519ce6b80d0551a6ab6bd1bc5988777310b9d0c0c9745ce805dd004470e20",
+      "sha256": "913519ce6b80d0551a6ab6bd1bc5988777310b9d0c0c9745ce805dd004470e20"
+    },
+    {
+      "tree": "vllm",
+      "path": "config/speculative.py",
+      "source_sha256": "cc0eee77b98713df537fd2e5f899f2f9df3c1d98973e70ae6d77826f10581572",
+      "sha256": "cc0eee77b98713df537fd2e5f899f2f9df3c1d98973e70ae6d77826f10581572"
+    },
+    {
+      "tree": "vllm",
+      "path": "distributed/device_communicators/shm_broadcast.py",
+      "source_sha256": "240fd6a148aa6729e110380ca1188aaab6bc722e7c7ad5110c8aa301388bd967",
+      "sha256": "55b9dda00e4d5f4ad7e0aae14104547e80e2d88981728626ed1f873e8f92a426"
+    },
+    {
+      "tree": "vllm",
+      "path": "envs.py",
+      "source_sha256": "14dacb5476f67fb1f767b777cec7918d684c3728d372a6aa542dd5abd12d84d1",
+      "sha256": "14dacb5476f67fb1f767b777cec7918d684c3728d372a6aa542dd5abd12d84d1"
+    },
+    {
+      "tree": "vllm",
+      "path": "model_executor/warmup/b12x_prepare.py",
+      "source_sha256": "203210fc97234af2892fe4ce35191fc5ec7ddc958265042e212b541a377627a0",
+      "sha256": "93706bf4d8a9f8d3449a8f963636768cb490527493f8fa237d36dbaaea1d9f4c"
+    },
+    {
+      "tree": "vllm",
+      "path": "models/deepseek_v4_1/attention.py",
+      "source_sha256": "d3b92eb0e9d64de567185e24bc04d6001b76da5653cdaa4fb512f7f5a8432752",
+      "sha256": "d3b92eb0e9d64de567185e24bc04d6001b76da5653cdaa4fb512f7f5a8432752"
+    },
+    {
+      "tree": "vllm",
+      "path": "models/deepseek_v4_1/common/engram.py",
+      "source_sha256": "253ca7f2eeee522128a8aea969498e8ce41a70ada1a52e445e652963217e4241",
+      "sha256": "253ca7f2eeee522128a8aea969498e8ce41a70ada1a52e445e652963217e4241"
+    },
+    {
+      "tree": "vllm",
+      "path": "models/deepseek_v4_1/l2_prefetch.py",
+      "source_sha256": "d5f1989d26752620113afe6659e421a300436d2c44414a8a62eb43184fd8a16f",
+      "sha256": "d5f1989d26752620113afe6659e421a300436d2c44414a8a62eb43184fd8a16f"
+    },
+    {
+      "tree": "vllm",
+      "path": "models/deepseek_v4_1/nvidia/dspark.py",
+      "source_sha256": "b11eee974ebe44d7e63acd09ce902da5520d2574e2c82c1bca719a293a97a1d0",
+      "sha256": "8a299401db2b7689c8806ee8332a3651f9161bb3984814d95f75dccfffb6e562"
+    },
+    {
+      "tree": "vllm",
+      "path": "models/deepseek_v4_1/nvidia/model.py",
+      "source_sha256": "22f0cc096c59ee31075db560060c1a7c963f598534eefc99ff2e1790acc0cd70",
+      "sha256": "22f0cc096c59ee31075db560060c1a7c963f598534eefc99ff2e1790acc0cd70"
+    },
+    {
+      "tree": "vllm",
+      "path": "models/deepseek_v4_1/nvidia/model_state.py",
+      "source_sha256": "7004e7fc0834627a2975a138f7b997806e5a86bab11c80b18997292c59b5aa02",
+      "sha256": "d79320e31b8b5a3fdfffd3c14c612f6939edb00a45dbea77b7aa30d1f53e65dc"
+    },
+    {
+      "tree": "vllm",
+      "path": "v1/core/block_pool.py",
+      "source_sha256": "720215b0508dbab462063b2a21d9f7ae1fdbf0bc3041f66ec9e19c6e2dd018d3",
+      "sha256": "cfeb17809865dbdf8d0948d5ab1061b6059e6e8d61f90d8989214788291bf94c"
+    },
+    {
+      "tree": "vllm",
+      "path": "v1/utils.py",
+      "source_sha256": "5b6015d60ea96ab24b0f2e0b7701abaa90d6107bca01b51ac3d4bc361fbdfcff",
+      "sha256": "76851b91ea5492ece687c312aca29b216405eceba0f2e74d7158cb0b58784053"
+    },
+    {
+      "tree": "vllm",
+      "path": "v1/worker/gpu/model_runner.py",
+      "source_sha256": "9322af06b06072d2aa75aaa8aa8068dbca6218b51a21c0cc0bcfe8d72b883ba9",
+      "sha256": "9151e305ae0cf115cb6380c19ccfc6576a12ee075d02ab233780d396c3e65c68"
+    },
+    {
+      "tree": "vllm",
+      "path": "v1/worker/gpu/spec_decode/dflash/speculator.py",
+      "source_sha256": "1ba0642931d7e9b1b7b04fef0e0eaf73d85b4ffb87025a1cfbfc74b8b28b62f7",
+      "sha256": "c18bd191d1fcd165d794deb0d075e73f8d914448ab2e3bb4cf880551f5a998b6"
+    },
+    {
+      "tree": "vllm",
+      "path": "v1/worker/gpu/spec_decode/ds41_prefill.py",
+      "source_sha256": null,
+      "sha256": "bf83255d8f0ee5e7a0b5ee5c3d4735af71d3f42f33486f5863d8a593980f5173"
+    },
+    {
+      "tree": "vllm",
+      "path": "v1/worker/gpu/spec_decode/dspark/speculator.py",
+      "source_sha256": "3abd884eb21cc7dcc2b88069214f0f8c02214d15410afd5f1ce30ce9d136be2b",
+      "sha256": "3abd884eb21cc7dcc2b88069214f0f8c02214d15410afd5f1ce30ce9d136be2b"
+    }
+  ],
+  "knapcio_commit": "e9ec61d276c467c747777ed8b9671dac80455954"
+}

@@ -351,7 +351,7 @@ class PatchedSourceTests(unittest.TestCase):
 class FleetControlsTests(unittest.TestCase):
     def test_config_helper_preserves_operator_recipe_and_refuses_overwrite(self):
         helper = load('configure_dspark_prefill', ROOT / 'configure-dspark-prefill.py')
-        source = json.loads((ROOT / 'cluster-karmic-c16.json').read_text())
+        source = json.loads((ROOT / 'cluster-karmic-20260925.json').read_text())
         source.update(engram_resident_scales=True, gpu_memory_utilization=0.87,
                       adaptive_speculative_tokens_window=100)
         with tempfile.TemporaryDirectory() as directory:

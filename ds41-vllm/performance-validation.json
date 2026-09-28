@@ -1,0 +1,40 @@
+{
+  "checked_at": "2026-09-28T11:26:18.980884+00:00",
+  "local_tests": {
+    "run": 128,
+    "passed": 123,
+    "skipped": [
+      {
+        "test": "test_display_kv.DisplayKvHeadroomTests.test_capacity_is_reported_on_the_serving_metrics_surface",
+        "reason": "run observe.py for a display-kv-{baseline,enabled} pair first"
+      },
+      {
+        "test": "test_display_kv.DisplayKvHeadroomTests.test_credited_kv_memory_is_larger_by_the_display_credit",
+        "reason": "run observe.py for a display-kv-{baseline,enabled} pair first"
+      },
+      {
+        "test": "test_display_kv.DisplayKvHeadroomTests.test_disabled_run_matches_the_recorded_baseline",
+        "reason": "run observe.py for a display-kv-{baseline,enabled} pair first"
+      },
+      {
+        "test": "test_display_kv.DisplayKvHeadroomTests.test_display_backing_is_not_ordinary_ram",
+        "reason": "run observe.py for a display-kv-{baseline,enabled} pair first"
+      },
+      {
+        "test": "test_display_kv.DisplayKvHeadroomTests.test_reported_capacity_never_falls_and_matches_when_the_floor_moves",
+        "reason": "run observe.py for a display-kv-{baseline,enabled} pair first"
+      }
+    ],
+    "failures": 0,
+    "errors": 0,
+    "runtime": "Windows Python 3.13; isolated CPU Torch 2.9.0 dependencies"
+  },
+  "source_manifest_files": 26,
+  "compiled_python_files": 66,
+  "diff_whitespace_check": "passed",
+  "gpu_execution": "not run",
+  "arm64_image_build": "not run",
+  "fleet_benchmarks": "not run",
+  "fleet_contacted": false,
+  "active_service_changed": false
+}

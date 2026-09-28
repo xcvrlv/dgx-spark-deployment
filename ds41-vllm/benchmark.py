@@ -2,6 +2,7 @@
 """Uncached streaming measurements for same-image communication/prefill A/B runs."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 from pathlib import Path
 import statistics
@@ -12,14 +13,17 @@ import uuid
 import fleet
 
 
-def measure(config, tokens, max_tokens):
+def measure(config, tokens, max_tokens, *, temperature=0, top_p=1.0, seed=None):
     url = f"http://{config['nodes'][0]['ip']}:{config['port']}/v1/completions"
     payload = {'model': fleet.MODEL, 'prompt': tokens, 'max_tokens': max_tokens,
-               'temperature': 0, 'stream': True, 'stream_options': {'include_usage': True}}
+               'temperature': temperature, 'top_p': top_p, 'seed': seed,
+               'stream': True, 'stream_options': {'include_usage': True}}
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
     start = time.monotonic()
     first = None
     usage = None
+    text = []
+    finish_reason = None
     with urllib.request.urlopen(req, timeout=1800) as response:
         for line in response:
             if not line.startswith(b'data: '):
@@ -32,13 +36,80 @@ def measure(config, tokens, max_tokens):
                 raise RuntimeError(event['error'])
             if event.get('usage'):
                 usage = event['usage']
-            if first is None and any(c.get('text') for c in event.get('choices', [])):
-                first = time.monotonic()
+            for choice in event.get('choices', []):
+                if choice.get('text'):
+                    text.append(choice['text'])
+                    if first is None:
+                        first = time.monotonic()
+                if choice.get('finish_reason'):
+                    finish_reason = choice['finish_reason']
     end = time.monotonic()
     assert first is not None and usage and usage['completion_tokens'] > 0, 'Incomplete generation'
     return {'ttft_seconds': first - start, 'latency_seconds': end - start,
             'prompt_tokens': usage['prompt_tokens'], 'completion_tokens': usage['completion_tokens'],
-            'decode_tokens_per_second': (usage['completion_tokens'] - 1) / max(end - first, 1e-9)}
+            'decode_tokens_per_second': (usage['completion_tokens'] - 1) / max(end - first, 1e-9),
+            'text': ''.join(text), 'finish_reason': finish_reason}
+
+
+def run(args):
+    config = fleet.load_config(args.config)
+    assert 0 < args.concurrency <= config['max_num_seqs']
+    assert args.requests > 0 and args.max_tokens > 0 and args.input_tokens > 0
+    assert args.input_tokens + args.max_tokens <= config['max_model_len']
+    assert 0 <= args.temperature < float('inf') and 0 < args.top_p <= 1
+    corpus = None
+    if args.prompt_file:
+        corpus = args.prompt_file.read_text(encoding='utf-8')
+        assert corpus.strip(), 'The prompt file is empty'
+    prompts = []
+    for i in range(args.requests):
+        # Fresh prefix for each request and each run. Real-text files are never
+        # repeated to reach a requested length: an undersized corpus is an error.
+        text = f'Document {uuid.uuid4().hex}:\n' + (corpus if corpus is not None else (
+            'The observatory records the weather and reviews its measurements each morning.\n'
+            * args.input_tokens))
+        tokens = fleet.request(config, '/tokenize', {'model': fleet.MODEL, 'prompt': text})['tokens']
+        assert len(tokens) >= args.input_tokens, 'Prompt file has fewer tokens than --input-tokens'
+        prompts.append(tokens[:args.input_tokens])
+    image_id = None
+    if not args.http_only:
+        image_ids = [fleet.remote(config, rank, 'docker image inspect --format ' +
+                     fleet.shlex.quote('{{.Id}}') + ' ' + fleet.shlex.quote(config['image']))
+                     for rank in range(4)]
+        assert len(set(image_ids)) == 1
+        image_id = image_ids[0]
+    metrics_url = f"http://{config['nodes'][0]['ip']}:{config['port']}/metrics"
+
+    def metrics():
+        try:
+            with urllib.request.urlopen(metrics_url, timeout=10) as response:
+                return response.read().decode('utf-8')
+        except (OSError, ValueError):
+            return None
+
+    before = metrics()
+    start = time.monotonic()
+    with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+        results = list(pool.map(lambda item: measure(
+            config, item[1], args.max_tokens, temperature=args.temperature,
+            top_p=args.top_p, seed=args.seed + item[0]), enumerate(prompts)))
+    wall = time.monotonic() - start
+    report = {'config': config, 'image_id': image_id, 'http_only': args.http_only,
+              'concurrency': args.concurrency, 'temperature': args.temperature,
+              'top_p': args.top_p, 'seed': args.seed, 'requests': results,
+              'prompt_kind': 'file' if corpus is not None else 'repeated_filler',
+              'prompt_sha256': hashlib.sha256(corpus.encode()).hexdigest() if corpus else None,
+              'metrics_before': before, 'metrics_after': metrics(),
+              'wall_seconds': wall,
+              'median_ttft_seconds': statistics.median(r['ttft_seconds'] for r in results),
+              'aggregate_output_tokens_per_second': sum(r['completion_tokens'] for r in results) / wall,
+              'measurement_note': 'TTFT includes queueing and sampling; client decode rate assumes one token in the first text chunk. Neither is a kernel timing or a cold-cache prefill measurement.'}
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2) + '\n')
+    print(json.dumps({k: v for k, v in report.items()
+                      if k not in ('config', 'requests', 'metrics_before', 'metrics_after')}, indent=2))
+    return report
 
 
 if __name__ == '__main__':
@@ -48,31 +119,13 @@ if __name__ == '__main__':
     parser.add_argument('--max-tokens', type=int, default=128)
     parser.add_argument('--concurrency', type=int, default=1)
     parser.add_argument('--requests', type=int, default=3)
+    parser.add_argument('--temperature', type=float, default=0)
+    parser.add_argument('--top-p', type=float, default=1)
+    parser.add_argument('--seed', type=int, default=123400)
+    parser.add_argument('--prompt-file', type=Path,
+                        help='Varied UTF-8 real text; never padded with repeated filler')
+    parser.add_argument('--http-only', action='store_true',
+                        help='Use only the HTTP endpoint; never SSH to any node')
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
-    config = fleet.load_config(args.config)
-    assert 0 < args.concurrency <= config['max_num_seqs']
-    assert args.requests > 0 and args.max_tokens > 0 and args.input_tokens > 0
-    assert args.input_tokens + args.max_tokens <= config['max_model_len']
-    prompts = []
-    # Unique leading nonce prevents prefix-cache reuse within/across A/B runs.
-    for i in range(args.requests):
-        text = f'Document {uuid.uuid4().hex}:\n' + ('The observatory records the weather and reviews its measurements each morning.\n' * args.input_tokens)
-        tokens = fleet.request(config, '/tokenize', {'model': fleet.MODEL, 'prompt': text})['tokens']
-        assert len(tokens) >= args.input_tokens
-        prompts.append(tokens[:args.input_tokens])
-    image_ids = [fleet.remote(config, rank, 'docker image inspect --format ' +
-                  fleet.shlex.quote('{{.Id}}') + ' ' + fleet.shlex.quote(config['image'])) for rank in range(4)]
-    assert len(set(image_ids)) == 1
-    start = time.monotonic()
-    with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-        results = list(pool.map(lambda tokens: measure(config, tokens, args.max_tokens), prompts))
-    wall = time.monotonic() - start
-    report = {'config': config, 'image_id': image_ids[0], 'concurrency': args.concurrency,
-              'requests': results, 'wall_seconds': wall,
-              'median_ttft_seconds': statistics.median(r['ttft_seconds'] for r in results),
-              'aggregate_output_tokens_per_second': sum(r['completion_tokens'] for r in results) / wall}
-    output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, indent=2) + '\n')
-    print(json.dumps({k: v for k, v in report.items() if k not in ('config', 'requests')}, indent=2))
+    run(args)

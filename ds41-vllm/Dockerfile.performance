@@ -1,0 +1,34 @@
+# All optional serving overlays in one layer on the latest native Karmic image.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER root
+COPY patches/dspark_prefill.py patches/dspark_prefill_runtime.py \
+     patches/karmic_autotune.py patches/karmic_autotune_runtime.py \
+     patches/prefill_8192_graph.py patches/sparkring_performance.py \
+     patches/sparkring_gc_runtime.py patches/knapcio_decode.py \
+     patches/knapcio_decode_runtime.py /opt/ds41/patches/
+COPY patches/performance-manifest.json /opt/ds41/performance-manifest.json
+COPY performance-check.py /opt/ds41/
+COPY patches/LICENSE.sparkring patches/NOTICE.performance /opt/ds41/licenses/
+RUN vllm_package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")" \
+    && b12x_package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \
+    && python3 /opt/ds41/patches/dspark_prefill.py "$vllm_package" \
+    && python3 /opt/ds41/patches/karmic_autotune.py "$vllm_package" "$b12x_package" \
+    && python3 /opt/ds41/patches/prefill_8192_graph.py "$vllm_package" \
+    && python3 /opt/ds41/patches/sparkring_performance.py "$vllm_package" "$b12x_package" \
+    && python3 /opt/ds41/patches/knapcio_decode.py "$b12x_package" \
+    && python3 /opt/ds41/performance-check.py
+RUN DS41_B12X_BOUNDED_AUTOTUNE=0 MAX_JOBS=1 TORCH_EXTENSIONS_DIR=/opt/ds41/preparation-memory-build \
+    python3 -c "from pathlib import Path; import shutil; from b12x.preparation._memory import _counter; module = _counter(); target = Path('/opt/ds41/preparation-memory'); target.mkdir(parents=True, exist_ok=True); shutil.copy2(module.__file__, target / 'b12x_preparation_memory.so')"
+COPY gpu-tests/ /opt/ds41/dspark-prefill-tests/
+ENV DS41_SKIP_PREFILL_DRAFT=0 DS41_COMPACT_CONTEXT_GRAPH=0 \
+    DS41_B12X_BOUNDED_AUTOTUNE=0 DS41_PREFILL_8192_GRAPH=0 \
+    DS41_H2D_STAGING=0 DS41_DEFER_AUTOTUNE_GC=0 \
+    DS41_BOUNDED_PREFIX_HASHES=0 DS41_SHM_BUSY_LOOP_S=1 DS41_MOE_COALESCE_BARRIERS=0
+LABEL local-inference.performance-bundle="ds41-performance-v1" \
+      local-inference.dspark-prefill-overlay="ds41-dspark-prefill-v1" \
+      local-inference.bounded-autotune="ds41-bounded-autotune-v1" \
+      local-inference.preparation-memory="image-built-v1" \
+      local-inference.prefill-8192-graph="ds41-prefill-8192-graph-v2" \
+      local-inference.sparkring-source="8b152d65c701f557f62ae6a9a1c3db90771c1df3" \
+      local-inference.knapcio-source="e9ec61d276c467c747777ed8b9671dac80455954"

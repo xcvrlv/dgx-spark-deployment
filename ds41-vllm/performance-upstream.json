@@ -1,0 +1,47 @@
+{
+  "repositories": [
+    {
+      "name": "vllm",
+      "repo": "local-inference-lab/vllm",
+      "branch": "dev/karmic-kraken",
+      "sha": "502d6cb5acd2ba2a62ecf58497be558c9d86089f",
+      "date": "2026-09-28T04:14:48Z",
+      "url": "https://github.com/local-inference-lab/vllm/commit/502d6cb5acd2ba2a62ecf58497be558c9d86089f",
+      "message": "Integrate Kimi memory reuse and decode scheduling options (#925)\n\nBound vision intermediates, gather variable-length image embeddings, reuse consumed activations and residual storage, and add optional projection sharding, L2 prefetch and KDA projection overlap. CPU regression and local lint checks are recorded; full GPU graph, aliasing, model-evaluation and performance qualification remain incomplete and are accepted for integration.\n\nSigned-off-by: Martin Vit <martin@voipmonitor.org>"
+    },
+    {
+      "name": "vllm_jovian",
+      "repo": "local-inference-lab/vllm",
+      "branch": "dev/jovian-judgement",
+      "sha": "8e1f1e587f8d24faf606f334a1c4bdaaa6bd4368",
+      "date": "2026-09-17T04:55:30Z",
+      "url": "https://github.com/local-inference-lab/vllm/commit/8e1f1e587f8d24faf606f334a1c4bdaaa6bd4368",
+      "message": "Fix deferred grammar rejection in v2 speculative sampling\n\nPropagate grammar-invalid draft suffix lengths to the v2 worker and sharded\nsampler. Restore invalid input IDs in the existing grammar-mask kernel before\nrejection sampling, respecting device logit bounds for shortened verification\nwindows. This prevents accepted draft counts from exceeding grammar-valid\ncounts after termination without adding a GPU launch.\n\nKeep the scheduler assertion and include request and draft counts on failure.\n\nValidation: 49 focused grammar, scheduler, and GPU tests passed; all applicable\npre-commit hooks passed.\nThe focused Qwen3.8 checkpoint-tokenizer/native GPU probe reports one accepted\ndraft for one valid draft. The original serving request and throughput have\nnot been replayed.\n\nSigned-off-by: Luke Alonso <lalonso@gmail.com>"
+    },
+    {
+      "name": "b12x",
+      "repo": "local-inference-lab/b12x",
+      "branch": "HEAD",
+      "sha": "d44247b6171f7c2f9787341ae884b537887d7df9",
+      "date": "2026-09-27T16:18:56Z",
+      "url": "https://github.com/local-inference-lab/b12x/commit/d44247b6171f7c2f9787341ae884b537887d7df9",
+      "message": "Support prepared PCIe collectives for uneven TP/DCP groups (#411)\n\nAdd partial-island hierarchical all-reduce for 9/10 ranks and prepared DCP attention exchange for 9/10/12 ranks. Retain compiled launcher dependencies, preserve paired-gather defaults, and cap partial-island default dispatch at 32 KiB. CPU topology and preparation validation: 154 passed. DCP suite: 39 passed and 27 pre-existing failures reproduced on the landing base. Final-source multi-GPU and serving qualification remain pending."
+    },
+    {
+      "name": "sparkring",
+      "repo": "FujitsuPolycom/sparkring",
+      "branch": "one-command-installer",
+      "sha": "8b152d65c701f557f62ae6a9a1c3db90771c1df3",
+      "date": "2026-09-28T03:25:31Z",
+      "url": "https://github.com/FujitsuPolycom/sparkring/commit/8b152d65c701f557f62ae6a9a1c3db90771c1df3",
+      "message": "Record MiMo image input working on the MiMo vision fix image\n\nInstallations of mimo-v26-flash-rl-tp2 and mimo-v26-flash-rl-tp4 through\ninstall.sh on image dev-20260927-mimovision-cuda1342-nccl2323-status032,\nchecked by the profile acceptance harness, passed all 7 functional checks:\nasked for the colors of a red-and-blue picture, MiMo answered red and blue on\nboth clusters, where the parent image answered black and white. The\n256-request screens returned no degenerate response; the wrong answers are\nquestion a4 each time, as on the parent image. Decode at 1 / 8 / 16 streams,\ntemperature 1.0: 36.1 / 138 / 212 tokens/s on the pair and 52.9 / 188 / 342\non the ring, with verification step rates within 5% of the parent image's.\n\nThe README's MiMo rows, their measurement links and both MiMo profiles'\nevidence text cite these records. Host names and network mount names in the\ninstaller logs are replaced with NODE_A-NODE_D and NETWORK_SHARE_n.\n\nValidation: markdown link, release-safety and Compose example checks pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+    }
+  ],
+  "checked_at": "2026-09-28T10:29:00.1688288Z",
+  "comparison_repository": {
+    "repo": "knapcio/DeepSeek-V4.1-Flash-4x-DGX-Spark-TP4",
+    "sha": "e9ec61d276c467c747777ed8b9671dac80455954",
+    "url": "https://github.com/knapcio/DeepSeek-V4.1-Flash-4x-DGX-Spark-TP4/commit/e9ec61d276c467c747777ed8b9671dac80455954",
+    "date": "2026-09-25T16:24:04Z"
+  }
+}

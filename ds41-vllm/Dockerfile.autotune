@@ -1,0 +1,14 @@
+# Child of the operator's existing image; preserves DSpark and bounded hashes.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER root
+COPY patches/karmic_autotune.py patches/karmic_autotune_runtime.py /opt/ds41/patches/
+RUN vllm_package="$(python3 -c "from importlib.metadata import distribution; print(distribution('vllm').locate_file('vllm'))")" \
+    && b12x_package="$(python3 -c "from importlib.metadata import distribution; print(distribution('b12x').locate_file('b12x'))")" \
+    && python3 /opt/ds41/patches/karmic_autotune.py "$vllm_package" "$b12x_package" \
+    && python3 /opt/ds41/patches/karmic_autotune.py "$vllm_package" "$b12x_package" --check
+RUN DS41_B12X_BOUNDED_AUTOTUNE=0 MAX_JOBS=1 TORCH_EXTENSIONS_DIR=/opt/ds41/preparation-memory-build \
+    python3 -c "from pathlib import Path; import shutil; from b12x.preparation._memory import _counter; module = _counter(); target = Path('/opt/ds41/preparation-memory'); target.mkdir(parents=True, exist_ok=True); shutil.copy2(module.__file__, target / 'b12x_preparation_memory.so')"
+ENV DS41_B12X_BOUNDED_AUTOTUNE=0
+LABEL local-inference.bounded-autotune="ds41-bounded-autotune-v1"
+LABEL local-inference.preparation-memory="image-built-v1"

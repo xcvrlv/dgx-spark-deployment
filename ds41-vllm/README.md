@@ -1,9 +1,19 @@
 # DeepSeek V4.1 Flash � JJ + b12x, four Sparks
 
-Current recipe: **[Karmic Kraken, 16 sequences / 1M context](UPSTREAM-KARMIC.md)**,
-4096 batched tokens and automatically sized KV cache. Run `build-image.sh` and
-`configure-karmic.py`. `fleet.py` defaults to `cluster-karmic-c16.json`.
-The older JJ profiles below retain their existing image tags.
+Current image: **[latest Karmic + b12x performance bundle](SPARKRING-PERFORMANCE.md)**,
+pinned to vLLM `502d6cb` and b12x `d44247b` after live checks on 2026-09-28.
+One build includes all optional overlays. `cluster-karmic-c16.json` advances
+upstream while retaining the previous serving choices: 16 sequences, 1M context,
+4096 batched tokens and automatically sized KV cache. The candidate and control
+presets compare the new switches on the same image.
+
+Use `performance-settings.py --from-config <actual recipe> --output <new recipe>`
+to preserve the operator's paths, memory and batch settings. Read the bundle
+guide for independent switches, source comparisons, GPU checks, manual restart,
+and HTTP-only varied-text benchmarking. No fleet was contacted for this update.
+The [original Karmic migration](UPSTREAM-KARMIC.md) and older JJ profiles below
+retain their historical evidence. The earlier individual child-image build
+procedures apply to the saved 2026-09-25 pins.
 
 For the current prefill investigation, read [Spark prefill audit](PREFILL-SPARK-AUDIT.md):
 4096-token graph eligibility, optional 1.43 GiB/rank resident Engram scales,
@@ -13,6 +23,14 @@ These candidates do not change the default serving profile.
 The follow-up [DSpark prefill overlay](DSPARK-PREFILL.md) implements optional
 intermediate-chunk draft skipping and 128-row context capture, with build,
 GPU validation, memory qualification and independent rollback instructions.
+
+For the 8192-token batch investigation and bounded kernel tuning, see
+[Spark autotuning](AUTOTUNE-SPARK.md). The optional child image enables the
+8192-token target prefill graph, verifies actual serving replay on every rank,
+and retains bounded kernel tuning. The investigation compares the operator's
+benchmark with 4096 batches and checks physical memory, swap activity and
+preparation progress across all four nodes. Read the measured KV-capacity
+tradeoff before selecting the larger batch.
 
 **Evaluated but not enabled: the GB10 display-reserve KV credit.** A headless
 Spark's ~2 GB firmware display reservation can back up to 1.75 GiB of KV per GPU,

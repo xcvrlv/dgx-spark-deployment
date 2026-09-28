@@ -1,5 +1,9 @@
 # Karmic Kraken serving migration — 2026-09-25
 
+The [2026-09-28 performance bundle](SPARKRING-PERFORMANCE.md) supersedes the
+build pins and combines the optional overlays. This document retains the
+original migration evidence; its source table and image scope are historical.
+
 ## Pinned source and scope
 
 | Source | Checked head | Role |

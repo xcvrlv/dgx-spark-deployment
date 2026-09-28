@@ -26,14 +26,15 @@ class PrefillDiagnosticTests(unittest.TestCase):
                 'image_id': 'sha256:running', 'state': {'Running': True, 'OOMKilled': False},
                 'labels': {'org.opencontainers.image.revision': self.config['vllm_commit'],
                            'local-inference.b12x.commit': self.config['b12x_commit'],
-                           'local-inference.prefill-hash-overlay': 'ds41-bounded-hashes-v1',
+                           'local-inference.performance-bundle': 'ds41-performance-v1',
                            'local-inference.dspark-prefill-overlay': 'ds41-dspark-prefill-v1'},
                 'environment': m.fleet.environment(self.config, 0),
                 'arguments': {key: argv[argv.index(key) + 1] for key in m.ARG_KEYS if key in argv},
             },
             'tag_image_id': 'sha256:running',
-            'source': {'patch_files': {name: {'matches_checkout': True} for name in m.PATCH_FILES},
-                       'patch_checks': {'prefill_hashes.py': 'passed', 'dspark_prefill.py': 'passed'}},
+            'source': {'patch_files': {name: {'matches_checkout': True}
+                                      for name in ('performance-check.py', 'performance-manifest.json')},
+                       'patch_checks': {'performance_bundle': 'passed'}},
             'logs': {'activation': {key: False for key in m.MARKERS}},
             'memory': {'available_gib': 3, 'swap_used_gib': 1},
         }
@@ -46,9 +47,9 @@ class PrefillDiagnosticTests(unittest.TestCase):
     def test_stale_tag_pin_drift_and_hash_patch_failure_are_detected(self):
         self.data['tag_image_id'] = 'sha256:new-build'
         self.data['container']['labels']['local-inference.b12x.commit'] = 'wrong-pin'
-        self.data['source']['patch_checks']['prefill_hashes.py'] = 'Unexpected patch state'
+        self.data['source']['patch_checks']['performance_bundle'] = 'Unexpected patch state'
         issues = ' '.join(m.assess(self.config, 0, self.data))
-        for evidence in ('Running image ID differs', 'local-inference.b12x.commit', 'prefill_hashes.py'):
+        for evidence in ('Running image ID differs', 'local-inference.b12x.commit', 'performance_bundle'):
             self.assertIn(evidence, issues)
 
     def test_logs_do_not_override_disabled_flags_or_missing_resident_scales(self):

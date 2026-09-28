@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-09-28T11:21:40.829463+00:00",
+  "repositories": {
+    "vllm": {
+      "pin": "502d6cb5acd2ba2a62ecf58497be558c9d86089f",
+      "head": "502d6cb5acd2ba2a62ecf58497be558c9d86089f",
+      "different": false,
+      "url": "https://github.com/local-inference-lab/vllm/commit/502d6cb5acd2ba2a62ecf58497be558c9d86089f"
+    },
+    "vllm_jovian": {
+      "pin": null,
+      "head": "8e1f1e587f8d24faf606f334a1c4bdaaa6bd4368",
+      "different": null,
+      "url": "https://github.com/local-inference-lab/vllm/commit/8e1f1e587f8d24faf606f334a1c4bdaaa6bd4368"
+    },
+    "b12x": {
+      "pin": "d44247b6171f7c2f9787341ae884b537887d7df9",
+      "head": "d44247b6171f7c2f9787341ae884b537887d7df9",
+      "different": false,
+      "url": "https://github.com/local-inference-lab/b12x/commit/d44247b6171f7c2f9787341ae884b537887d7df9"
+    },
+    "sparkring": {
+      "head": "8b152d65c701f557f62ae6a9a1c3db90771c1df3",
+      "url": "https://github.com/FujitsuPolycom/sparkring/commit/8b152d65c701f557f62ae6a9a1c3db90771c1df3"
+    },
+    "knapcio": {
+      "head": "e9ec61d276c467c747777ed8b9671dac80455954",
+      "url": "https://github.com/knapcio/DeepSeek-V4.1-Flash-4x-DGX-Spark-TP4/commit/e9ec61d276c467c747777ed8b9671dac80455954"
+    }
+  }
+}

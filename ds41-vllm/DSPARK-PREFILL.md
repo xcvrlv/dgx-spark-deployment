@@ -1,5 +1,9 @@
 # DSpark prefill overlay — 2026-09-27
 
+The [latest performance bundle](SPARKRING-PERFORMANCE.md) includes both switches
+in one image on the 2026-09-28 pins. The child-image commands below apply to the
+saved 2026-09-25 source pair; use `performance-settings.py` for the new image.
+
 This implements two opt-in changes for the existing Karmic TP4/c16/K5 recipe:
 
 - **Skip unused drafts on intermediate prompt chunks.** Context KV insertion

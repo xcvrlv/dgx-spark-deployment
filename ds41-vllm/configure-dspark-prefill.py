@@ -15,6 +15,8 @@ def configure(source, output, image, *, skip=True, graph=True):
     config = fleet.load_config(source)
     if image == config['image']:
         raise ValueError('Use a new child-image tag to preserve rollback')
+    if fleet.source_pins(config) == fleet.LATEST_PINS:
+        raise ValueError('Latest performance image includes DSpark prefill; use performance-settings.py')
     config.update(image=image, dspark_skip_prefill_draft=skip,
                   dspark_compact_context_graph=graph, graph_memory_debug=True)
     # Validate the completed candidate before creating the operator's file.

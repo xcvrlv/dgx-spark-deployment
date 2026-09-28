@@ -33,10 +33,13 @@ docker build --platform linux/arm64 --target vllm-openai \
   --build-arg VLLM_BUILD_COMMIT="$VLLM_COMMIT" \
   --tag "$base" "$src"
 base_id="$(docker image inspect --format '{{.Id}}' "$base")"
+native="$base-roce"
 docker build --platform linux/arm64 --file "$here/Dockerfile.karmic" \
   --build-arg KK_IMAGE="$base" --build-arg B12X_COMMIT="$B12X_COMMIT" \
   --build-arg VLLM_COMMIT="$VLLM_COMMIT" \
-  --label "local-inference.kk-base-id=$base_id" --tag "$IMAGE" "$here"
+  --label "local-inference.kk-base-id=$base_id" --tag "$native" "$here"
+docker build --platform linux/arm64 --file "$here/Dockerfile.performance" \
+  --build-arg BASE_IMAGE="$native" --tag "$IMAGE" "$here"
 [[ $(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE") == linux/arm64 ]]
 docker run --rm --gpus all --entrypoint python3 "$IMAGE" /opt/ds41/image-check.py --gpu
 docker image inspect "$IMAGE" > "$here/.build/image-inspect.json"

@@ -2,6 +2,7 @@
 """Run on Spark 1. Standard-library SSH/Docker launcher for four Spark nodes."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import shlex
@@ -22,6 +23,34 @@ DSPARK_PREFILL_OPTIONS = {
     'dspark_skip_prefill_draft': 'DS41_SKIP_PREFILL_DRAFT',
     'dspark_compact_context_graph': 'DS41_COMPACT_CONTEXT_GRAPH',
 }
+LATEST_PINS = ('502d6cb5acd2ba2a62ecf58497be558c9d86089f',
+               'd44247b6171f7c2f9787341ae884b537887d7df9')
+OVERLAY_PINS = {
+    ('1794dcf18454900263e0c66711af8ea4a1283ac1',
+     'a7d7d29b2ef8869086e0ceaa787321f17544e3c9'), LATEST_PINS,
+}
+PERFORMANCE_ENV = {
+    'engram_overlap': 'VLLM_DS41_ENGRAM_OVERLAP',
+    'dspark_markov_nvfp4': 'VLLM_DS41_MARKOV_NVFP4',
+    'dspark_draft_nvfp4_head': 'VLLM_DS41_DRAFT_NVFP4_HEAD',
+    'l2_prefetch': 'VLLM_DS41_L2_PREFETCH',
+    'h2d_staging': 'DS41_H2D_STAGING',
+    'b12x_defer_gc': 'DS41_DEFER_AUTOTUNE_GC',
+    'bounded_prefix_hashes': 'DS41_BOUNDED_PREFIX_HASHES',
+    'moe_coalesce_barriers': 'DS41_MOE_COALESCE_BARRIERS',
+}
+
+
+def source_pins(c):
+    return c.get('vllm_commit'), c.get('b12x_commit')
+
+
+def exact_decode_graph_sizes(c):
+    # Include draft query width K and every adaptive target verification depth
+    # 1..K+1 for each admitted request count. No depth relies on an eager gap.
+    return sorted({requests * width
+                   for requests in range(1, c['max_num_seqs'] + 1)
+                   for width in range(1, c['draft_tokens'] + 2)})
 # The display reserve is firmware memory the OS cannot use, so it is credited to
 # the KV budget rather than reached through gpu_memory_utilization. The DRM group
 # is resolved on the node; this token is shell-expanded in plan(), not quoted.
@@ -44,15 +73,61 @@ def load_config(path):
     assert len(c['hcas']) == 2
     assert type(c.get('reduced_tuning', True)) is bool
     assert type(c.get('b12x_autotune', False)) is bool
+    assert type(c.get('b12x_bounded_autotune', False)) is bool
+    assert type(c.get('prefill_8192_graph', False)) is bool
+    if c.get('prefill_8192_graph', False):
+        assert c.get('upstream_branch') == 'dev/karmic-kraken'
+        assert source_pins(c) in OVERLAY_PINS
+        assert c['max_num_batched_tokens'] == 8192
+        if source_pins(c) != LATEST_PINS:
+            assert c.get('b12x_bounded_autotune') is True
+    if c.get('b12x_bounded_autotune', False):
+        assert c.get('upstream_branch') == 'dev/karmic-kraken'
+        assert source_pins(c) in OVERLAY_PINS
+        assert c.get('b12x_autotune') is True
+        assert type(c.get('b12x_compile_workers')) is int and 1 <= c['b12x_compile_workers'] <= 2
+        assert c.get('b12x_preparation_trace') is True and c.get('b12x_hang_dump') is True
+        for key, default, low, high in (
+            ('b12x_race_budget_mib', 1024, 64, 4096),
+            ('b12x_memory_reserve_mib', 4096, 4096, 16384),
+        ):
+            value = c.get(key, default)
+            assert type(value) is int and low <= value <= high, f'Invalid {key}'
     assert type(c.get('torch_profile', False)) is bool
+    for key in PERFORMANCE_ENV:
+        if key in c:
+            assert type(c[key]) is bool, f'{key} must be a boolean'
+            assert source_pins(c) == LATEST_PINS, f'{key} requires the audited latest pins'
+    for key, choices in (('draft_sample_method', ('greedy', 'probabilistic')),
+                         ('rejection_sample_method', ('standard', 'block')),
+                         ('decode_graph_policy', ('upstream', 'exact'))):
+        if key in c:
+            assert c[key] in choices, f'Invalid {key}'
+            assert source_pins(c) == LATEST_PINS
+    assert type(c.get('enable_adaptive_verification', True)) is bool
+    if 'engram_projection_tp' in c:
+        assert type(c['engram_projection_tp']) is bool
+        assert source_pins(c) == LATEST_PINS
+    if 'adaptive_verification_cost_scale' in c:
+        value = c['adaptive_verification_cost_scale']
+        assert type(value) in (int, float) and 0 < value < float('inf')
+        assert c['draft_tokens'] > 0 and c.get('enable_adaptive_verification', True)
+        assert source_pins(c) == LATEST_PINS
+    if 'shm_busy_loop_s' in c:
+        assert type(c['shm_busy_loop_s']) in (int, float) and 0 <= c['shm_busy_loop_s'] <= 1
+        assert source_pins(c) == LATEST_PINS
+    if c.get('performance_bundle') is not None:
+        assert c['performance_bundle'] == 'ds41-performance-v1'
+        assert source_pins(c) == LATEST_PINS
+    for key in ('dspark_markov_nvfp4', 'dspark_draft_nvfp4_head'):
+        assert not c.get(key, False) or c['draft_tokens'] > 0, f'{key} requires DSpark'
     for key in ('engram_resident_scales', 'graph_memory_debug', *DSPARK_PREFILL_OPTIONS):
         assert type(c.get(key, False)) is bool, f'{key} must be a boolean'
         if c.get(key, False):
             assert c.get('upstream_branch') == 'dev/karmic-kraken', f'{key} requires the audited Karmic profile'
     if any(c.get(key, False) for key in DSPARK_PREFILL_OPTIONS):
         assert c['draft_tokens'] > 0, 'DSpark prefill optimizations require speculative decoding'
-        assert c.get('vllm_commit') == '1794dcf18454900263e0c66711af8ea4a1283ac1', 'DSpark prefill overlay requires the audited vLLM pin'
-        assert c.get('b12x_commit') == 'a7d7d29b2ef8869086e0ceaa787321f17544e3c9', 'DSpark prefill overlay requires the audited b12x pin'
+        assert source_pins(c) in OVERLAY_PINS, 'DSpark prefill overlay requires audited paired pins'
     if c.get('dspark_compact_context_graph', False):
         assert c['max_num_batched_tokens'] >= 128, 'Compact context graph requires a 128-row buffer'
     assert c.get('upstream_branch', 'dev/jovian-judgement') in (
@@ -149,6 +224,24 @@ def environment(c, rank):
     if c.get('upstream_branch') == 'dev/karmic-kraken':
         # Compilation workers share physical RAM with the GPU on GB10.
         environment['B12X_COMPILE_WORKERS'] = str(c['b12x_compile_workers'])
+        environment['DS41_B12X_BOUNDED_AUTOTUNE'] = str(int(c.get('b12x_bounded_autotune', False)))
+        environment['DS41_PREFILL_8192_GRAPH'] = str(int(c.get('prefill_8192_graph', False)))
+        if source_pins(c) == LATEST_PINS:
+            for key, env in PERFORMANCE_ENV.items():
+                # An absent upstream control preserves its upstream default.
+                # Local source overlays default off, including the control recipe.
+                if key in c or key in ('h2d_staging', 'b12x_defer_gc', 'bounded_prefix_hashes',
+                                      'moe_coalesce_barriers'):
+                    environment[env] = str(int(c.get(key, False)))
+            environment['DS41_SHM_BUSY_LOOP_S'] = str(c.get('shm_busy_loop_s', 1))
+        if c.get('b12x_bounded_autotune', False):
+            environment.update({
+                'B12X_AUTOTUNE': '1',
+                'DS41_B12X_RACE_BUDGET_MIB': str(c.get('b12x_race_budget_mib', 1024)),
+                'DS41_B12X_RESERVE_MIB': str(c.get('b12x_memory_reserve_mib', 4096)),
+                **{f'B12X_{stage}_COMPILE_WORKERS': str(c['b12x_compile_workers'])
+                   for stage in ('WEIGHTS', 'STATE', 'BIND')},
+            })
         # Explicit zeros let either optimization be rolled back independently.
         environment.update({env: str(int(c.get(key, False)))
                             for key, env in DSPARK_PREFILL_OPTIONS.items()})
@@ -216,6 +309,8 @@ def serve_args(c, rank):
         # Upstream retains exact E8M0 bytes: about 1.43 GiB/rank at TP4.
         # Opt-in only; this competes with KV and graphs in GB10's shared RAM.
         engram['disk_resident_scales'] = True
+    if 'engram_projection_tp' in c:
+        engram['projection_tp'] = c['engram_projection_tp']
     cmd = ['vllm', 'serve', checkpoint_path(c, '/checkpoint'),
            '--served-model-name', MODEL, '--host', '0.0.0.0', '--port', str(c['port']),
            '--distributed-executor-backend', 'mp', '--nnodes', '4', '--node-rank', str(rank),
@@ -241,20 +336,27 @@ def serve_args(c, rank):
                        'cudagraph_capture_sizes': sizes,
                        'pass_config': {'fuse_allreduce_rms': False}}
         cmd += ['--compilation-config', json.dumps(compilation)]
-    if not c.get('b12x_autotune', False):
+    elif c.get('decode_graph_policy') == 'exact':
+        cmd += ['--compilation-config', json.dumps({
+            'cudagraph_mode': 'FULL_AND_PIECEWISE',
+            'cudagraph_capture_sizes': exact_decode_graph_sizes(c),
+        })]
+    if not c.get('b12x_autotune', False) or c.get('b12x_bounded_autotune', False):
         # Startup candidate racing overdrafts the device on this fleet. With
         # autotune off nothing is timed: every choice is prepared with its
         # default or cached configuration. The per-field backend flags above
         # still apply on top of this JSON in create_engine_config.
-        cmd += ['--kernel-config', json.dumps({'enable_b12x_autotune': False})]
+        cmd += ['--kernel-config', json.dumps({'enable_b12x_autotune': c.get('b12x_autotune', False)})]
     if c['draft_tokens']:
         cmd += ['--speculative-config', json.dumps({
             'method': 'dspark', 'num_speculative_tokens': c['draft_tokens'],
             'draft_tensor_parallel_size': 4, 'attention_backend': 'B12X',
-            'draft_sample_method': 'greedy', 'rejection_sample_method': 'standard',
-            'enable_adaptive_verification': True,
+            'draft_sample_method': c.get('draft_sample_method', 'greedy'),
+            'rejection_sample_method': c.get('rejection_sample_method', 'standard'),
+            'enable_adaptive_verification': c.get('enable_adaptive_verification', True),
             **{key: c[key] for key in (
-                'adaptive_speculative_tokens_window', 'adaptive_speculative_tokens_initial'
+                'adaptive_speculative_tokens_window', 'adaptive_speculative_tokens_initial',
+                'adaptive_verification_cost_scale'
             ) if c.get(key) is not None}})]
     if c.get('swa_block_size') is not None:
         cmd += ['--swa-block-size', str(c['swa_block_size'])]
@@ -288,12 +390,28 @@ def preflight(c):
         script += shlex.join(['mkdir', '-p', c['cache_path']]) + '\n'
         script += shlex.join(['test', '-r', checkpoint_path(c, c['model_path']) + '/config.json']) + '\n'
         script += shlex.join(['docker', 'image', 'inspect', '--format', '{{.Os}}/{{.Architecture}}', c['image']]) + " | grep -qx linux/arm64\n"
+        if source_pins(c) == LATEST_PINS:
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.performance-bundle"}}', c['image']]) + " | grep -qx ds41-performance-v1\n"
+            manifest_sha = hashlib.sha256((HERE/'patches/performance-manifest.json')
+                                          .read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+            script += shlex.join(docker(c, rank) + [
+                'python3', '/opt/ds41/performance-check.py',
+                '--expected-manifest-sha256', manifest_sha]) + '\n'
         if any(c.get('roce_optimizations', {}).values()):
             script += shlex.join(['docker', 'image', 'inspect', '--format',
                                   '{{index .Config.Labels "local-inference.roce-overlay"}}', c['image']]) + " | grep -qx ds41-roce-v1\n"
         if any(c.get(key, False) for key in DSPARK_PREFILL_OPTIONS):
             script += shlex.join(['docker', 'image', 'inspect', '--format',
                                   '{{index .Config.Labels "local-inference.dspark-prefill-overlay"}}', c['image']]) + " | grep -qx ds41-dspark-prefill-v1\n"
+        if c.get('b12x_bounded_autotune', False):
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.bounded-autotune"}}', c['image']]) + " | grep -qx ds41-bounded-autotune-v1\n"
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.preparation-memory"}}', c['image']]) + " | grep -qx image-built-v1\n"
+        if c.get('prefill_8192_graph', False):
+            script += shlex.join(['docker', 'image', 'inspect', '--format',
+                                  '{{index .Config.Labels "local-inference.prefill-8192-graph"}}', c['image']]) + " | grep -qx ds41-prefill-8192-graph-v2\n"
         if c.get('reduced_tuning', True):
             script += shlex.join(['docker', 'image', 'inspect', '--format',
                                   '{{index .Config.Labels "local-inference.b12x-tuning"}}', c['image']]) + " | grep -qx v1\n"
@@ -344,6 +462,16 @@ from b12x.comm import roce
 assert roce.is_supported(), 'RoCEnante unsupported'
 '''
         script += shlex.join(docker(c, rank) + ['python3', '-c', check]) + '\n'
+        if c.get('b12x_bounded_autotune', False):
+            counter_check = '''
+import torch
+from b12x.preparation._memory import _counter, allocated_bytes
+assert _counter().__file__.startswith('/opt/ds41/preparation-memory/')
+tensor = torch.empty(1024 * 1024, dtype=torch.uint8, device='cuda')
+assert allocated_bytes(0) == torch.cuda.memory_allocated(0) >= tensor.numel()
+print('Image-built preparation counter matches the live Torch allocator')
+'''
+            script += shlex.join(['timeout', '90', *docker(c, rank), 'python3', '-c', counter_check]) + '\n'
         script += shlex.join(docker(c, rank) + ['python3', '/opt/ds41/image-check.py', '--gpu']) + '\n'
         script += shlex.join(docker(c, rank) + ['python3', '/opt/ds41/model-check.py', checkpoint_path(c, '/checkpoint')]) + '\n'
         script += shlex.join(['docker', 'image', 'inspect', '--format', '{{.Id}}', c['image']]) + '\n'

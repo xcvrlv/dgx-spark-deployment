@@ -50,5 +50,22 @@
   "upstream_branch": "dev/karmic-kraken",
   "vllm_commit": "502d6cb5acd2ba2a62ecf58497be558c9d86089f",
   "b12x_commit": "d44247b6171f7c2f9787341ae884b537887d7df9",
-  "b12x_compile_workers": 4
+  "b12x_compile_workers": 4,
+  "performance_bundle": "ds41-performance-v1",
+  "engram_overlap": true,
+  "dspark_markov_nvfp4": false,
+  "dspark_draft_nvfp4_head": false,
+  "draft_sample_method": "greedy",
+  "rejection_sample_method": "standard",
+  "enable_adaptive_verification": true,
+  "l2_prefetch": true,
+  "engram_projection_tp": false,
+  "decode_graph_policy": "upstream",
+  "h2d_staging": false,
+  "b12x_defer_gc": false,
+  "moe_coalesce_barriers": false,
+  "bounded_prefix_hashes": false,
+  "dspark_skip_prefill_draft": false,
+  "dspark_compact_context_graph": false,
+  "prefill_8192_graph": false
 }

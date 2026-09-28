@@ -21,8 +21,9 @@ def configure(source, output):
                 'swa_block_size', 'roce_optimizations', 'b12x_autotune',
                 'b12x_compile_workers', 'reduced_tuning', 'fabric_check'):
         old[key] = template[key]
-    # The new image carries only the RoCE transport patch. Drop controls for
-    # the old graph/shape and display-KV experiments from the new profile.
+    # This migration selects the baseline serving profile. Use
+    # performance-settings.py to preserve memory settings and enable the new
+    # bundle's options. Drop legacy graph/shape and display-KV controls here.
     for key in ('display_kv', 'graph_request_buckets', 'torch_profile',
                 'adaptive_speculative_tokens_window',
                 'adaptive_speculative_tokens_initial'):

@@ -1,0 +1,5 @@
+*
+!Dockerfile.autotune
+!patches/
+!patches/karmic_autotune.py
+!patches/karmic_autotune_runtime.py
