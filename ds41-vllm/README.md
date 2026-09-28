@@ -215,3 +215,20 @@ build and fleet gates on the Sparks. CPU validation:
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+# Cached input usage
+
+The fleet launcher enables vLLM's native `--enable-prompt-tokens-details` by
+default. Responses expose prefix-cache reuse as
+`usage.prompt_tokens_details.cached_tokens`, including zero cache hits.
+`prompt_tokens` remains the total input count. This reports KV prefix reuse,
+not Engram row-cache hits. Set `"enable_prompt_tokens_details": false` in the
+fleet JSON to disable reporting. Restart the service after updating the launcher;
+no image rebuild is needed. For streaming requests, request
+`"stream_options": {"include_usage": true}` so the final usage chunk is sent.
+
+Source check on 2026-09-28: Karmic remains `502d6cb5acd2ba2a62ecf58497be558c9d86089f`,
+Jovian remains `8e1f1e587f8d24faf606f334a1c4bdaaa6bd4368`, and b12x HEAD is now
+`b4b12bcf200a9979f40a3a9b7e660c6d83b91a73` (image remains pinned to `d44247b`).
+Native usage reporting already exists in the pinned Karmic source, so no vLLM
+source patch or pin change is required. Live vLLM/LiteLLM propagation remains
+to be checked after the operator restarts.

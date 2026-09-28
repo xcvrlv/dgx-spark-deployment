@@ -73,6 +73,7 @@ def load_config(path):
     assert len(c['hcas']) == 2
     assert type(c.get('reduced_tuning', True)) is bool
     assert type(c.get('b12x_autotune', False)) is bool
+    assert type(c.get('enable_prompt_tokens_details', True)) is bool
     assert type(c.get('b12x_bounded_autotune', False)) is bool
     assert type(c.get('prefill_8192_graph', False)) is bool
     if c.get('prefill_8192_graph', False):
@@ -327,6 +328,8 @@ def serve_args(c, rank):
            '--no-scheduler-reserve-full-isl',
            '--generation-config', 'vllm', '--reasoning-parser', 'deepseek_v41',
            '--tool-call-parser', 'deepseek_v41', '--enable-auto-tool-choice']
+    if c.get('enable_prompt_tokens_details', True):
+        cmd += ['--enable-prompt-tokens-details']
     if c.get('upstream_branch') != 'dev/karmic-kraken':
         depth = c['draft_tokens'] + 1
         maximum = c['max_num_seqs'] * depth
